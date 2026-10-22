@@ -1,0 +1,30 @@
+# Planning files (read by absolute path from the main folder; never shipped).
+# Anchored with a leading / so only the repo-root folders match (tools/art/ stays tracked).
+/PLAN.md
+/ART.md
+/CHANGELOG.md
+/HANDOFF*.md
+/CODEX_HANDOFF*.md
+/BUILD-STATUS.md
+/team/
+/status/
+/research/
+/look-tests/
+/art/
+/plan-site/
+
+# Build machinery
+.worktrees/
+.merge-lock
+assets/generated/
+
+# OS / editor
+.DS_Store
+*.swp
+node_modules/
+
+# QA output (screenshots, reports)
+tools/qa/out/
+
+# Python bytecode from the tools/art scripts
+__pycache__/

@@ -1,0 +1,35 @@
+/* Kiln: design tokens (OWNER: D; JS twin: COLOR in src/core/constants.js, owned by C).
+   Values from the handoff "Exact values" and ART.md. One accent: HEAT. Cyan for cold powers only. */
+:root {
+  --void: #07080A;          /* page background */
+  --graphite: #121417;      /* solid UI surfaces, blur-off fallback */
+  --world: #0F0D0C;         /* the kiln interior (canvas clear colour) */
+  --text: #F2F4F7;
+  --w70: rgba(242, 244, 247, .7);
+  --w55: rgba(242, 244, 247, .55);
+  --w50: rgba(242, 244, 247, .5);
+  --w40: rgba(242, 244, 247, .4);
+  --grey: #8A9099;
+  --heat-lo: #FF7A1A;
+  --heat-hi: #FFD9A8;
+  --heat: linear-gradient(180deg, #FFD9A8, #FF7A1A);
+  --heat-last: #F36123;     /* last life: heat-low shifts 30% toward warn (ART §10, R19) */
+  --on-heat: #1A0E05;       /* text on the primary button's heat fill */
+  --cold: #5FD4E6;
+  --warn: #D72638;
+  --fill: rgba(255, 255, 255, .08);
+  --hair-tl: rgba(255, 255, 255, .2);
+  --hair-br: rgba(255, 255, 255, .1);
+  --sep: rgba(255, 255, 255, .12);
+  --radius: 12px;
+  --radius-inner: 4px;
+  --blur: 24px;
+  --shadow: 0 8px 24px rgba(0, 0, 0, .4);
+  --ease: cubic-bezier(.2, .7, .2, 1);
+  --ease-ring: cubic-bezier(0, 0, .2, 1);
+  --t-panel: 180ms;
+  --t-ring: 120ms;
+  --t-last: 400ms;          /* last-life shift eases in and out (ART §10) */
+  --font-display: "Inter Tight", "Inter", system-ui, sans-serif;
+  --font-body: "Inter", system-ui, sans-serif;
+}

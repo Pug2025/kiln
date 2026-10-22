@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Kiln Wordmark Check</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&family=Inter+Tight:wght@600;700&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: #07080A; color: #F2F4F7; overflow: hidden; }
+  .wrap { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; }
+  /* the title test's wordmark: Inter Tight 700, the I is a slot the flame fills */
+  .mark { display: flex; align-items: baseline; font: 700 clamp(88px, 11.5vw, 168px)/0.9 "Inter Tight", sans-serif; letter-spacing: -.02em; }
+  .mark .slot { display: inline-block; position: relative; width: .19em; height: .715em; margin: 0 .06em 0 .05em; vertical-align: baseline; border-radius: 2px; transform: translateY(.012em); }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div class="wrap"><div class="mark">K<span class="slot" id="slot"></span>LN</div></div>
+<script type="module">
+import { createWordmarkFlame } from '../render/wordmark.js';
+await document.fonts.load('700 100px "Inter Tight"').catch(() => {});
+const flame = createWordmarkFlame(document.getElementById('slot'));
+window.__flame = flame;
+const loop = (now) => { flame.frame(now / 1000); requestAnimationFrame(loop); };
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

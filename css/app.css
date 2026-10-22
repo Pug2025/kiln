@@ -1,0 +1,89 @@
+/* Kiln: page, stage and gesture suppression (OWNER: D). HUD: hud.css. Glass layer: screens.css. */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+/* no double-tap zoom on any element (iOS ignores user-scalable=no and dblclick preventDefault);
+   zero specificity, so #stage (none) and .scroll (pan-y) still narrow it */
+:where(*) { touch-action: manipulation; }
+html, body {
+  height: 100%;
+  background: var(--void);
+  color: var(--text);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow: hidden;
+  overscroll-behavior: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+}
+/* fixed body: no rubber-band scroll or pull-to-refresh on iOS */
+body { position: fixed; inset: 0; width: 100%; height: 100%; height: 100dvh; }
+#stage { position: fixed; inset: 0; touch-action: none; }
+/* the 3D view inside the stage: full screen, or shortened top and bottom (main.js layout) where the
+   HUD band or the touch Overload button needs room the field would otherwise give up; the stage
+   keeps every finger */
+#view { position: absolute; left: 0; right: 0; top: var(--view-top, 0px); bottom: var(--view-bottom, 0px); }
+/* the renderer scales the canvas 6% under a blurred menu (to hide the blur's soft edge): the scale
+   eases with the blur (180 ms in, 120 ms out) instead of snapping on frame 0 (ART 15.6 D4) */
+.kiln-canvas { display: block; width: 100%; height: 100%; transition: filter var(--t-panel) var(--ease), transform var(--t-panel) var(--ease); }
+.kiln-canvas:not(.menu) { transition-duration: 120ms; }
+/* menus over live play: blur the world 40 px, dim 35%, keep its colour (R6) */
+.kiln-canvas.menu { filter: blur(40px) brightness(.65); }
+/* R20: reduce transparency dims without blur */
+html.rt .kiln-canvas.menu { filter: brightness(.65); }
+#ui { position: fixed; inset: 0; pointer-events: none; z-index: 2; }
+[hidden] { display: none !important; }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; margin: 0; cursor: pointer; -webkit-appearance: none; appearance: none; }
+button:focus, [tabindex]:focus { outline: none; }
+
+/* section label (R10): caps, tracked, white 55%, on a 1 px hairline at 20% */
+.kicker {
+  display: flex; align-items: center; gap: 12px;
+  font: 500 12px/1 var(--font-body); letter-spacing: .28em; text-transform: uppercase; color: var(--w55);
+  white-space: nowrap;
+}
+.kicker::after { content: ""; flex: 1; height: 1px; background: var(--hair-tl); order: 1; }
+.kicker > .tag, .kicker > .mult { order: 2; }
+.kicker.r { flex-direction: row-reverse; }
+
+/* thumb pad (one-handed play): 64 px, 1 px ring, a dot; pointer-transparent, input hit-tests it */
+.thumbpad {
+  position: fixed; left: 0; top: 0; z-index: 3; width: 64px; height: 64px; border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .3); pointer-events: none;
+  transition: background-color 120ms var(--ease);
+}
+.thumbpad::after {
+  content: ""; position: absolute; left: 50%; top: 50%; width: 8px; height: 8px; margin: -4px 0 0 -4px;
+  border-radius: 50%; background: var(--w55);
+}
+.thumbpad.down { background: rgba(255, 255, 255, .08); }
+.thumbpad[hidden] { display: none; }
+
+/* touch Overload button: 56 px, opposite corner to the thumb pad; lit (white) when HEAT allows.
+   Its label is a button label (ART §3: Inter 500 12-14 px) in sentence case: "QUENCH" in caps at
+   12 px with .2em tracking is wider than the 56 px circle. */
+.overload-btn {
+  position: fixed; left: 0; top: 0; z-index: 3; width: 56px; height: 56px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center; pointer-events: none;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .2);
+  font: 500 12px/1 var(--font-body); letter-spacing: .02em; color: var(--w55); white-space: nowrap;
+  transition: color var(--t-panel) var(--ease), box-shadow var(--t-panel) var(--ease), background-color var(--t-panel) var(--ease);
+}
+.overload-btn.ready { color: var(--text); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .7); background: rgba(255, 255, 255, .08); }
+.overload-btn[hidden] { display: none; }
+
+/* first paint: the hearth plate under the title while three.js loads; the live kiln fades in */
+.boot-plate {
+  position: fixed; inset: 0; z-index: 1; pointer-events: none;
+  background: var(--void) url(../img/hearth.webp) center bottom / cover no-repeat;
+  transition: opacity 700ms var(--ease);
+}
+body.ready .boot-plate { opacity: 0; }
+
+/* boot line and the no-WebGL fallback: a solid surface, no world behind it */
+.boot {
+  position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+  background: var(--graphite); font: 400 16px/1.4 var(--font-body); color: var(--w70); text-align: center; padding: 24px;
+}

@@ -1,0 +1,312 @@
+/* Kiln: the glass layer (OWNER: D). ART §5 Panels, §6 Motion, R7–R12, R17, R20.
+   12 px radius, white 8% fill, 1 px hairlines (20% top/left, 10% bottom/right), 24 px blur, one
+   soft shadow; never glass on glass (inner cards are fills); rows 44 px with 1 px separators;
+   flat buttons, one primary with the heat fill; a 1 px heat ring that moves. Panels fade 0→1 and
+   scale 0.98→1 over 180 ms while the blur rises 0→24 px; exit is a 120 ms fade. Nothing slides. */
+
+.screens, .cards { position: fixed; inset: 0; pointer-events: none; }
+.screen {
+  position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+  padding: max(24px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right))
+           max(24px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  pointer-events: auto;
+}
+.screen.out { pointer-events: none; }
+
+.panel {
+  position: relative; border-radius: var(--radius);
+  background: var(--fill);
+  border: 1px solid var(--hair-br); border-top-color: var(--hair-tl); border-left-color: var(--hair-tl);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(130%); backdrop-filter: blur(var(--blur)) saturate(130%);
+  box-shadow: var(--shadow);
+  padding: 16px 8px 8px;
+}
+.panel > .kicker { padding: 0 8px; margin-bottom: 8px; }
+.screen .panel {
+  opacity: 0; transform: scale(.98);
+  -webkit-backdrop-filter: blur(0px) saturate(100%); backdrop-filter: blur(0px) saturate(100%);
+  transition: opacity var(--t-panel) var(--ease), transform var(--t-panel) var(--ease),
+              -webkit-backdrop-filter var(--t-panel) var(--ease), backdrop-filter var(--t-panel) var(--ease);
+}
+.screen.in .panel {
+  opacity: 1; transform: none;
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(130%); backdrop-filter: blur(var(--blur)) saturate(130%);
+}
+.screen.in .panel + .panel, .screen.in .stack > * + * > .panel { transition-delay: 60ms; }
+.screen.out .panel { opacity: 0; transform: none; transition: opacity 120ms var(--ease); }
+
+.stack { display: flex; flex-direction: column; gap: 16px; width: min(400px, 100%); max-height: 100%; }
+.stack.narrow { width: min(340px, 100%); }
+.stack.wide { width: min(680px, 100%); }
+.panel .sub { padding: 0 12px 8px; font: 400 14px/1.4 var(--font-body); color: var(--w50); }
+.panel .body { padding: 4px 12px 12px; font: 400 16px/1.45 var(--font-body); color: var(--w70); }
+
+/* menu rows: 44 px, 1 px separators at 12%, no zebra */
+.menu { position: relative; display: flex; flex-direction: column; }
+.row {
+  position: relative; display: flex; align-items: center; gap: 12px; width: 100%; height: 44px; padding: 0 12px;
+  border-radius: var(--radius-inner); text-align: left;
+  font: 600 17px/1 var(--font-display); letter-spacing: .02em; color: var(--w70);
+  transition: color var(--t-panel) var(--ease);
+}
+.row + .row::before { content: ""; position: absolute; left: 12px; right: 12px; top: 0; height: 1px; background: var(--sep); }
+.row.sel, .row:hover { color: var(--text); }
+.row .label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row .detail { font: 400 13px/1 var(--font-body); letter-spacing: 0; color: var(--w50); white-space: nowrap; }
+.row .arrow { font: 400 15px/1 var(--font-body); color: var(--w50); }
+.row.off { color: var(--w40); cursor: default; }
+
+/* the selection ring: 1 px heat, inset, radius 4; it moves in 120 ms ease-out */
+.ring {
+  position: fixed; left: 0; top: 0; width: 0; height: 0; z-index: 5; border-radius: var(--radius-inner);
+  box-shadow: inset 0 0 0 1px var(--heat-lo); pointer-events: none; opacity: 0;
+  transition: transform var(--t-ring) var(--ease-ring), width var(--t-ring) var(--ease-ring),
+              height var(--t-ring) var(--ease-ring), opacity var(--t-panel) var(--ease);
+}
+.ring.on { opacity: 1; }
+/* around the primary button the ring sits 2 px outside it (the heat fill would hide an inset ring) */
+.ring.outer { border-radius: calc(var(--radius-inner) + 3px); }
+.ring.jump { transition: opacity var(--t-panel) var(--ease); }
+.screen.out .ring { opacity: 0; }
+
+/* buttons: flat white 10%, radius 4; the one primary gets the heat fill (never heat text) */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; height: 36px; padding: 0 18px;
+  border-radius: var(--radius-inner); background: rgba(255, 255, 255, .1); color: var(--text);
+  font: 500 13px/1 var(--font-body); letter-spacing: .04em; white-space: nowrap;
+}
+.btn:hover, .btn.sel { background: rgba(255, 255, 255, .16); }
+.btn.primary { background: linear-gradient(180deg, var(--heat-hi), var(--heat-lo)); color: var(--on-heat); }
+.btn.primary:hover, .btn.primary.sel { filter: brightness(1.06); }
+.btn.off { opacity: .4; cursor: default; }
+.foot { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 12px 8px 4px; }
+.foot .spacer { flex: 1; }
+
+/* numbers */
+.stats { display: flex; flex-wrap: wrap; gap: 16px 28px; padding: 8px 12px 4px; }
+.stat b {
+  display: block; margin-bottom: 6px; font: 600 22px/1 var(--font-display); letter-spacing: -.02em;
+  font-variant-numeric: tabular-nums; color: var(--text);
+}
+.stat span { font: 500 12px/1 var(--font-body); letter-spacing: .25em; text-transform: uppercase; color: var(--w55); }
+.stat.hero b {
+  font-size: 64px; font-weight: 700;
+  background: linear-gradient(180deg, var(--heat-hi), var(--heat-lo));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.hero-wrap { padding: 4px 12px 8px; }
+/* results (ART 15.6 D7): the stats fade in 40 ms apart after the panel; the clear bonus lands 60 ms
+   before the score's count-up ends (results.js COUNT); a new best is a tag on the hero's label */
+.screen-results .stats .stat { opacity: 0; transition: opacity var(--t-panel) var(--ease); transition-delay: calc(180ms + var(--i, 0) * 40ms); }
+.screen-results.in .stats .stat { opacity: 1; }
+.screen-results.in .stats .stat.late { transition-delay: 570ms; }
+.stat .tag { margin-left: 12px; font-style: normal; color: var(--text); }
+
+/* settings controls: monochrome */
+.row.setting { cursor: pointer; }
+.row.setting .value { font: 400 13px/1 var(--font-body); letter-spacing: 0; color: var(--w50); min-width: 28px; text-align: right; }
+.switch { position: relative; flex: none; width: 32px; height: 18px; border-radius: 9px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .3); transition: background-color 120ms var(--ease); }
+.switch i { position: absolute; left: 3px; top: 3px; width: 12px; height: 12px; border-radius: 50%; background: var(--w55); transition: transform 120ms var(--ease), background-color 120ms var(--ease); }
+.is-on .switch { background: rgba(255, 255, 255, .85); }
+.is-on .switch i { transform: translateX(14px); background: var(--void); }
+.row.slider input[type=range] {
+  -webkit-appearance: none; appearance: none; flex: 0 1 150px; min-width: 80px; height: 24px; background: transparent; cursor: pointer;
+  --v: 50%;
+}
+.row.slider input[type=range]::-webkit-slider-runnable-track { height: 1px; background: linear-gradient(90deg, var(--w70) var(--v), rgba(255, 255, 255, .2) var(--v)); }
+.row.slider input[type=range]::-moz-range-track { height: 1px; background: linear-gradient(90deg, var(--w70) var(--v), rgba(255, 255, 255, .2) var(--v)); }
+.row.slider input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; margin-top: -6.5px; border-radius: 50%; background: var(--text); border: 0; }
+.row.slider input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: var(--text); border: 0; }
+
+/* inner cards: fills, never a second glass */
+.fillcard { border-radius: var(--radius-inner); background: rgba(255, 255, 255, .05); }
+
+/* long lists scroll inside their panel, never the page */
+.scroll { overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; touch-action: pan-y; max-height: min(56dvh, 520px); }
+.scroll::-webkit-scrollbar { width: 0; height: 0; }
+
+/* key chips (R17) */
+.keys { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; font: 400 12px/1 var(--font-body); letter-spacing: .06em; color: var(--w50); }
+.keys span { display: inline-flex; align-items: center; gap: 6px; }
+kbd {
+  display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px; padding: 0 5px;
+  border-radius: 4px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .3); font: 500 12px/1 var(--font-body); color: var(--text);
+}
+@media (pointer: coarse) { .keys { display: none; } }
+
+/* toast */
+.toast {
+  position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom)); z-index: 6;
+  padding: 10px 16px; border-radius: var(--radius);
+  background: var(--fill); border: 1px solid var(--hair-br); border-top-color: var(--hair-tl); border-left-color: var(--hair-tl);
+  -webkit-backdrop-filter: blur(var(--blur)); backdrop-filter: blur(var(--blur)); box-shadow: var(--shadow);
+  font: 500 13px/1 var(--font-body); letter-spacing: .04em; color: var(--text);
+  transform: translateX(-50%); opacity: 0; pointer-events: none; transition: opacity var(--t-panel) var(--ease);
+}
+.toast.in { opacity: 1; }
+
+/* level card: text on the live world (content layer, like the HUD: no panel, no blur), in an empty
+   band of the field (ui.js sets --card-fy), takes no input. A soft dark shadow keeps it legible
+   over bright headroom art. Reduce transparency (R20) gives it the void-75% fill. */
+.card {
+  position: fixed; left: calc(var(--field-x, 0px) + var(--field-w, 100vw) / 2); top: calc(var(--field-y, 0px) + var(--field-h, 100vh) * var(--card-fy, .42));
+  width: min(320px, calc(var(--field-w, 100vw) - 32px)); padding: 16px 20px 18px; pointer-events: none;
+  border-radius: var(--radius);
+  text-shadow: 0 0 10px rgba(7, 8, 10, .75), 0 1px 2px rgba(7, 8, 10, .9);
+  opacity: 0; transform: translate(-50%, -50%) scale(.98);
+  transition: opacity var(--t-panel) var(--ease), transform var(--t-panel) var(--ease);
+}
+.card.in { opacity: 1; transform: translate(-50%, -50%); }
+.card.out { opacity: 0; transform: translate(-50%, -50%); transition: opacity 120ms var(--ease); }
+.card > .kicker { padding: 0; margin: 0; }
+.card > .kicker::after { box-shadow: 0 0 4px rgba(7, 8, 10, .8); }
+.card .kicker .tag { color: var(--w70); }
+.card .title { margin-top: 12px; font: 600 32px/1.05 var(--font-display); letter-spacing: -.01em; color: var(--text); }
+.card .adds { margin-top: 10px; font: 400 16px/1.35 var(--font-body); color: var(--w70); }
+.card .adds span { font: 500 12px/1 var(--font-body); letter-spacing: .25em; text-transform: uppercase; color: var(--w55); margin-right: 6px; }
+.card .sub { padding: 0; margin-top: 8px; font: 400 14px/1.4 var(--font-body); color: var(--w50); }
+
+/* title */
+.screen-title { justify-content: flex-start; }
+.title-grid { display: flex; flex-direction: column; gap: clamp(20px, 4vh, 40px); width: min(400px, 100%); margin-left: clamp(12px, 6vw, 96px); }
+.mark {
+  display: flex; align-items: baseline; font: 700 clamp(88px, 11.5vw, 168px)/.9 var(--font-display); letter-spacing: -.02em; color: var(--text);
+  opacity: 0; transform: scale(.98); transform-origin: 0 100%;
+  transition: opacity var(--t-panel) var(--ease), transform var(--t-panel) var(--ease);
+}
+.screen.in .mark { opacity: 1; transform: none; }
+/* the I's slot is the Inter Tight 700 I stem: square corners, its top on the K and L cap line, its
+   foot on the baseline (ART 15.6 D2); 1cap where supported, Inter Tight's cap height (.727em) else */
+.mark .slot { position: relative; display: inline-block; width: .19em; height: .727em; height: 1cap; margin: 0 .06em 0 .05em; border-radius: 0; overflow: hidden; }
+.mark .slot canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+/* CSS flame: shown until (or instead of) the renderer's live flame; never a dark slot */
+.mark .slot.css-flame {
+  background:
+    radial-gradient(60% 45% at 50% 92%, #FFF4E6 0%, rgba(255, 217, 168, .9) 35%, rgba(255, 122, 26, 0) 100%),
+    linear-gradient(0deg, #FF7A1A 0%, #FFB066 38%, #FFD9A8 62%, rgba(255, 217, 168, .25) 100%);
+  animation: kiln-flicker 1.9s ease-in-out infinite alternate;
+}
+@keyframes kiln-flicker { 0% { filter: brightness(1); } 45% { filter: brightness(1.12); } 70% { filter: brightness(.94); } 100% { filter: brightness(1.06); } }
+.title-grid .stats { padding: 0; }
+/* the wall (ART 15.6 D2): C's live wall in .wall, the world's level-card art until it mounts.
+   Desktop: a glass panel on the right (radius 12, 8 px in, so the wall's fill is radius 4) with
+   the facts and the one primary button. Narrower: the wall under the menu with no panel. */
+.title-side { display: flex; flex-direction: column; min-width: 0; }
+.title-side .wall { position: relative; overflow: hidden; border-radius: var(--radius-inner); }
+.title-side .wall-art { display: block; width: 100%; height: 100%; object-fit: cover; }
+.title-side .wall.live .wall-art { display: none; }
+.title-side .stats { padding: 14px 8px 0; }
+.title-side .foot .detail { font: 400 13px/1 var(--font-body); color: var(--w50); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (min-width: 1100px) {
+  .screen-title { justify-content: space-between; }
+  .title-side { width: min(640px, calc(100vw - 560px)); margin-right: clamp(24px, 6vw, 96px); }
+  .title-side .panel { padding: 8px; }
+  .title-side .wall { height: min(440px, calc(100dvh - 280px)); }
+}
+@media (max-width: 1099px) {
+  .screen-title { flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 20px; padding-top: max(40px, env(safe-area-inset-top)); }
+  .title-side.plain { width: min(400px, 100%); margin-left: clamp(12px, 6vw, 96px); }
+  .title-side.plain .wall { height: clamp(120px, calc(100dvh - 660px), 220px); }
+}
+/* a short screen keeps the menu whole: no wall */
+@media (max-width: 1099px) and (max-height: 780px) { .title-side.plain .wall { display: none; } }
+
+/* level map */
+.tabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 0 4px 8px; }
+/* tabs are buttons (ART §3: Inter 500 12-14 px), not caps kickers: four world names fit a phone */
+.tab {
+  height: 36px; padding: 0 4px; border-radius: var(--radius-inner); background: rgba(255, 255, 255, .04);
+  font: 500 13px/1.15 var(--font-body); letter-spacing: .04em; color: var(--w55); white-space: nowrap;
+}
+.tab.cur { background: rgba(255, 255, 255, .1); color: var(--text); }
+.tab.locked { color: var(--w40); }
+/* the world's card art: a 144 px strip shows its hero cells (ART 15.6 D8); shorter on short screens */
+.world-art { display: block; width: calc(100% - 8px); height: clamp(72px, calc(100dvh - 700px), 144px); margin: 0 4px 8px; object-fit: cover; border-radius: var(--radius-inner); background: rgba(255, 255, 255, .04); }
+.cells { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; padding: 0 4px; }
+.cell {
+  position: relative; display: flex; flex-direction: column; justify-content: space-between; align-items: flex-start;
+  min-height: 64px; padding: 10px; border-radius: var(--radius-inner); background: rgba(255, 255, 255, .05); text-align: left;
+}
+.cell b {
+  display: flex; align-items: center; gap: 6px;
+  font: 600 22px/1 var(--font-display); letter-spacing: -.02em; font-variant-numeric: tabular-nums; color: var(--text);
+}
+/* the kind (Bonus, Boss) is secondary text (ART §3: Inter 400 13 px, white 50%), not a caps label */
+.cell span { font: 400 13px/1 var(--font-body); letter-spacing: 0; color: var(--w50); white-space: nowrap; }
+.cell.locked b, .cell.locked span { opacity: .35; }
+/* cleared: a short 1 px line beside the number, clear of the kind label and the selection ring */
+.cell.cleared b::after { content: ""; flex: none; width: 10px; height: 1px; background: var(--w55); }
+.mapcard { margin: 10px 4px 0; padding: 12px; display: flex; flex-wrap: wrap; gap: 12px 16px; align-items: flex-end; }
+.mapcard .info { flex: 1 1 180px; min-width: 0; }
+.mapcard .n { font: 500 12px/1 var(--font-body); letter-spacing: .25em; text-transform: uppercase; color: var(--w55); }
+.mapcard .name { margin-top: 8px; font: 600 24px/1.05 var(--font-display); letter-spacing: -.01em; color: var(--text); }
+.mapcard .adds { margin-top: 6px; font: 400 16px/1.35 var(--font-body); color: var(--w70); }
+.mapcard .stat b { font-size: 17px; }
+
+/* picks (Mods, Overloads, gate doors) */
+.picks { display: grid; grid-template-columns: repeat(var(--n, 3), 1fr); gap: 6px; padding: 4px 4px 0; }
+.pick {
+  display: flex; flex-direction: column; gap: 8px; min-height: 112px; padding: 14px; text-align: left;
+  border-radius: var(--radius-inner); background: rgba(255, 255, 255, .05);
+}
+.pick.chosen { background: rgba(255, 255, 255, .1); }
+.pick .name { font: 600 17px/1.15 var(--font-display); letter-spacing: .01em; color: var(--text); }
+.pick .fact { font: 400 16px/1.35 var(--font-body); color: var(--w70); }
+.pick .tag { margin-top: auto; font: 500 12px/1 var(--font-body); letter-spacing: .25em; text-transform: uppercase; color: var(--w50); }
+
+/* The Forge */
+.forge-row { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 12px; min-height: 60px; padding: 8px 12px; position: relative; border-radius: var(--radius-inner); }
+.forge-row + .forge-row::before { content: ""; position: absolute; left: 12px; right: 12px; top: 0; height: 1px; background: var(--sep); }
+.forge-row .name { font: 600 16px/1.15 var(--font-display); color: var(--text); }
+.forge-row .fact { margin-top: 4px; font: 400 13px/1.3 var(--font-body); color: var(--w50); }
+.ranks { display: flex; gap: 4px; }
+.ranks i { display: block; width: 12px; height: 2px; background: var(--text); opacity: .18; }
+.ranks i.on { opacity: .9; }
+
+/* credits */
+.credits p { padding: 10px 12px; font: 400 16px/1.45 var(--font-body); color: var(--w70); -webkit-user-select: text; user-select: text; }
+.credits p + p { border-top: 1px solid var(--sep); }
+.credits a { color: var(--text); text-decoration: none; border-bottom: 1px solid var(--hair-tl); }
+
+/* phones */
+@media (max-width: 760px) {
+  .screen-title { align-items: center; }
+  .title-grid, .title-side.plain { margin: 0 auto; }
+  .mark { font-size: clamp(88px, 24vw, 100px); } /* ART §3 floor 88 px; 90 px at 375 wide */
+  .picks { grid-template-columns: 1fr; }
+  .pick { min-height: 0; }
+  .cells { gap: 4px; }
+  .cell { min-height: 54px; padding: 8px 6px; }
+  .cell b { font-size: 18px; gap: 4px; }
+  .cell.cleared b::after { width: 8px; }
+}
+/* narrow phones: White Heat may take two lines in its tab */
+@media (max-width: 400px) {
+  .tabs { gap: 3px; }
+  .tab { padding: 0 2px; white-space: normal; }
+}
+/* touch screens: every button and map tab is a 44 px target (after every .btn and .tab rule) */
+@media (pointer: coarse) {
+  .btn, .tab { height: 44px; min-height: 44px; }
+  .row.slider input[type=range] { height: 44px; }
+}
+@media (max-height: 520px) and (orientation: landscape) {
+  .mark { font-size: 64px; }
+  .title-grid { gap: 12px; }
+}
+
+/* R20 fallbacks. Reduce transparency: no blur, panel fill = void at 75%; hairlines and shadow stay. */
+html.rt .panel, html.rt .screen.in .panel, html.rt .toast {
+  -webkit-backdrop-filter: none; backdrop-filter: none; background: rgba(7, 8, 10, .75);
+}
+html.rt .card {
+  background: rgba(7, 8, 10, .75); text-shadow: none;
+  border: 1px solid var(--hair-br); border-top-color: var(--hair-tl); border-left-color: var(--hair-tl);
+}
+/* Reduce motion: fades only. No scale, the ring cross-fades instead of moving. */
+html.rm .screen .panel, html.rm .mark, html.rm .card { transform: none; }
+html.rm .card, html.rm .card.in, html.rm .card.out { transform: translate(-50%, -50%); }
+html.rm .ring { transition: opacity 120ms var(--ease); }
+html.rm .screen-results .stats .stat { transition-delay: 0ms; }
+html.rm .switch, html.rm .switch i { transition: none; }
+html.rm .mark .slot.css-flame { animation: none; }

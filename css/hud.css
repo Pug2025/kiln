@@ -1,0 +1,148 @@
+/* Kiln: the HUD (OWNER: D). Content layer (ART §4, R18): text and 1 px lines on the world, no
+   panels, no blur. Sizes are field units; src/ui/layout.js scales each block with the field. */
+.hud { position: fixed; inset: 0; pointer-events: none; }
+.hud .hb { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+/* enter like panels (ART §6): each block fades in and scales 0.98 to 1 from its anchored corner,
+   40 ms apart (score, level, HEAT, buttons). The scale lives on an inner box (.hi) so it never
+   scales the block's position (that would slide it). Exit: a 120 ms fade, no scale. */
+.hud .hi, .hud .hud-btns .icon-btn {
+  opacity: 0; scale: .98; transform-origin: 0 0;
+  transition: opacity 120ms var(--ease), scale 0s linear 120ms, color var(--t-panel) var(--ease);
+}
+.hud .hud-right .hi { transform-origin: 100% 0; }
+.hud .hud-btns .icon-btn { transform-origin: 50% 50%; }
+.hud.on .hi, .hud.on .hud-btns .icon-btn {
+  opacity: 1; scale: 1;
+  transition: opacity var(--t-panel) var(--ease), scale var(--t-panel) var(--ease), color var(--t-panel) var(--ease);
+}
+.hud.on .hud-right .hi { transition-delay: 40ms; }
+.hud.on .hud-heat .hi { transition-delay: 80ms; }
+.hud.on .hud-btns .icon-btn { transition-delay: 120ms, 120ms, 0ms; }
+html.rm .hud .hi, html.rm .hud .hud-btns .icon-btn { scale: none; }
+/* legibility over bright headroom art: a soft dark shadow under the text and lines (never a panel) */
+.hud { text-shadow: 0 0 6px rgba(7, 8, 10, .7), 0 1px 2px rgba(7, 8, 10, .85); }
+.hud .kicker::after, .hud .track, .hud .marks i { box-shadow: 0 0 3px rgba(7, 8, 10, .8); }
+/* Small text never drops below a legible screen size: layout.js (hudText) sets these field-unit
+   sizes so that size x scale stays at or above its floor (kicker 12 px, name 13, READY and drop
+   labels 12, suffix 13, level number and clock 22, score numeral 44: ART 15.6 D3). Text takes its
+   size from these variables. */
+.hud { --k: 12px; --small: 13px; --tiny: 11px; --num: 15px; --lvl: 32px; --score: 72px; }
+.hud .kicker, .heat-row .k { font-size: var(--k); line-height: 1; }
+.hud .num { font-family: var(--font-display); letter-spacing: -.02em; font-variant-numeric: tabular-nums; line-height: 1; color: var(--text); }
+
+/* score: the hero, the only heat-coloured text. Last life (R19, ART §10): the gradient's low end
+   eases from heat-low to #F36123 over 400 ms, and back when a Life drop is caught. A gradient
+   cannot transition, so its low end is a registered colour property that does; a browser without
+   @property switches at once. */
+@property --score-lo { syntax: '<color>'; inherits: false; initial-value: #FF7A1A; }
+.hud-score { width: 300px; }
+/* the numeral and its suffix (ART 15.6 D5): ×mult on the numeral's baseline, 8 units after it, the
+   delta (or a note such as "Free miss") above it; with no ×mult the delta takes the baseline */
+.hud .srow { display: flex; align-items: flex-end; width: max-content; margin-top: 12px; }
+.hud .srow .score { flex: none; white-space: nowrap; }
+.hud .score {
+  --score-lo: var(--heat-lo);
+  font-size: var(--score); font-weight: 700;
+  background: linear-gradient(180deg, var(--heat-hi), var(--score-lo));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  /* a text-shadow would paint over the clipped gradient: the shadow comes from a filter instead */
+  text-shadow: none; filter: drop-shadow(0 1px 5px rgba(7, 8, 10, .6));
+  transition: --score-lo var(--t-last) var(--ease);
+}
+.hud.last .score { --score-lo: var(--heat-last); }
+/* line-height 1: a baseline sits .137em above the box's bottom (Inter Tight), so the suffix column is
+   lifted by the difference to share the numeral's baseline */
+.hud .sfx {
+  display: flex; flex-direction: column-reverse; align-items: flex-start; gap: 4px; margin-left: 8px;
+  padding-bottom: calc((var(--score) - var(--num)) * .137); white-space: nowrap;
+}
+.hud .mult { font: 600 var(--num)/1 var(--font-display); letter-spacing: 0; color: var(--w70); text-transform: none; }
+.hud .mult:empty { display: none; }
+.hud .delta {
+  font: 600 var(--num)/1 var(--font-display); letter-spacing: 0; text-transform: none; color: var(--w70);
+  font-variant-numeric: tabular-nums; opacity: 0; transition: opacity 250ms var(--ease);
+}
+.hud .delta.show { opacity: 1; }
+
+/* HEAT: kicker on a 1 px track, 3 px heat fill, READY when an Overload can fire */
+.hud-heat { width: 300px; }
+/* The first two powers get one short fact where the opening levels have no HEAT meter yet.
+   Two lines fit the existing reserved block; normal effect labels return after the fact. */
+.hud-heat.drop-fact-on .heat-row, .hud-heat.drop-fact-on .fx-row { visibility: hidden; }
+.drop-fact { position: absolute; left: 0; top: 0; width: 100%; display: flex; flex-direction: column; gap: 5px; }
+.drop-fact[hidden] { display: none; }
+.drop-fact > :first-child { font: 500 var(--tiny)/1 var(--font-body); letter-spacing: .2em; text-transform: uppercase; color: var(--text); }
+.drop-fact > :last-child { font: 400 var(--small)/1 var(--font-body); color: var(--w70); }
+.heat-row { display: flex; align-items: center; gap: 14px; height: var(--k); }
+.heat-row[hidden] { display: none; }
+.heat-row .k { flex: none; width: 3.8em; font-weight: 500; font-family: var(--font-body); letter-spacing: .28em; text-transform: uppercase; color: var(--w55); }
+.heat-row .track { position: relative; flex: 1; height: 1px; background: var(--sep); }
+.heat-row .fill {
+  position: absolute; left: 0; top: -1px; width: 100%; height: 3px; border-radius: 2px;
+  background: linear-gradient(90deg, var(--heat-lo), var(--heat-hi));
+  transform: scaleX(0); transform-origin: 0 50%; transition: transform 300ms var(--ease);
+}
+/* venting after an Overload (E's econ.ventMs): a 1 px white line on the track that empties */
+.heat-row .vent {
+  position: absolute; left: 0; top: 0; width: 100%; height: 1px; background: var(--w70);
+  transform: scaleX(0); transform-origin: 0 50%; transition: transform 300ms linear;
+}
+.heat-row .ready { font: 500 var(--tiny)/1 var(--font-body); letter-spacing: .2em; text-transform: uppercase; color: var(--text); opacity: 0; transition: opacity 300ms var(--ease); }
+.heat-row.full .ready { opacity: 1; }
+/* gutter (ART 15.6 D5): READY under the track's left end, on its own line above the drops */
+.hud.gutter .heat-row { position: relative; }
+.hud.gutter .heat-row .ready { position: absolute; left: calc(var(--k) * 3.8 + 14px); top: calc(var(--k) / 2 + 9px); }
+.hud.gutter .fx-row { margin-top: calc(20px + var(--tiny)); }
+
+/* active drops: a short caps label over a 1 px line for the time left */
+.fx-row { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 12px; min-height: calc(var(--tiny) + 5px); }
+.fx { position: relative; display: inline-flex; gap: 4px; padding-bottom: 5px; font: 500 var(--tiny)/1 var(--font-body); letter-spacing: .2em; text-transform: uppercase; color: var(--w70); }
+.fx[hidden] { display: none; }
+.fx b { font: 600 var(--tiny)/1 var(--font-display); letter-spacing: 0; color: var(--text); }
+.fx i { position: absolute; left: 0; right: .2em; bottom: 0; height: 1px; background: var(--sep); }
+.fx u { position: absolute; inset: 0; background: var(--w70); transform-origin: 0 50%; }
+.fx.cold u { background: var(--cold); }
+.fx.warn u { background: var(--warn); }
+
+/* right: level number, name, boss line, lives (or time on timed bonus levels) */
+.hud-right { width: 220px; text-align: right; }
+.hud .level { margin-top: 10px; font-size: var(--lvl); font-weight: 600; }
+.hud .name { margin-top: 6px; font: 400 var(--small)/1 var(--font-body); color: var(--w50); white-space: nowrap; }
+.hud .boss { margin: 10px 0 0 60px; }
+.hud .boss[hidden] { display: none; }
+.hud .boss .track { position: relative; display: block; height: 1px; background: var(--sep); }
+.hud .boss .fill { position: absolute; right: 0; top: -1px; width: 100%; height: 3px; border-radius: 2px; background: var(--w70); transform-origin: 100% 50%; transition: transform 300ms var(--ease); }
+.hud .lives, .hud .time { margin-top: 18px; }
+.hud .lives[hidden], .hud .time[hidden] { display: none; }
+.hud .marks { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+.hud .marks i {
+  display: block; width: 28px; height: 2px; background-color: var(--text); opacity: .9;
+  transition: background-color var(--t-last) var(--ease), opacity var(--t-last) var(--ease);
+}
+.hud .marks i[hidden] { display: none; }
+.hud .marks i.lost { opacity: .18; }
+.hud .marks i.warn { background-color: var(--warn); opacity: 1; }
+.hud .clock { margin-top: 10px; font-size: var(--lvl); font-weight: 600; }
+
+/* pause and sound: always one tap away during play. 44 px targets; the drawn disc is 32 px, no fill,
+   a 1 px ring at white 12% (ART 15.6 D3), a monochrome icon */
+.hud-btns { position: absolute; left: 0; top: 0; display: flex; gap: 4px; }
+.hud:not(.on) .hud-btns .icon-btn { pointer-events: none; }
+.icon-btn {
+  position: relative; display: flex; align-items: center; justify-content: center; width: 44px; height: 44px;
+  color: var(--w70); pointer-events: auto; transition: color var(--t-panel) var(--ease);
+}
+.icon-btn.corner { position: fixed; top: max(8px, env(safe-area-inset-top)); right: max(8px, env(safe-area-inset-right)); z-index: 4; }
+.icon-btn::before {
+  content: ""; position: absolute; inset: 6px; border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .12);
+}
+.icon-btn svg { position: relative; width: 18px; height: 18px; filter: drop-shadow(0 1px 2px rgba(7, 8, 10, .8)); }
+.icon-btn:hover, .icon-btn:focus-visible { color: var(--text); }
+.icon-btn[aria-pressed="true"] { color: var(--text); }
+
+/* phone band: no LIVES/TIME kicker, marks straight under the name */
+.hud.band .lives .kicker, .hud.band .time .kicker, .hud.inset .lives .kicker, .hud.inset .time .kicker { display: none; }
+.hud.band .lives, .hud.inset .lives { margin-top: 0; }
+.hud.band .time, .hud.inset .time { margin-top: 0; }
+.hud.band .time .clock, .hud.inset .time .clock { margin-top: 6px; }
