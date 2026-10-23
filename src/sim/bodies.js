@@ -7,20 +7,21 @@
 // Afterimage paddles deflect balls only; they never catch or get hurt.
 
 import { SIM, EMBERS, DROPS, BF, SRC, PADDLE, RING } from '../core/constants.js';
+import { DETAIL } from '../core/readability.js';
 import { EV } from '../core/events.js';
 import { emit } from '../core/bus.js';
 import { sweepRectCore, sweepCircleCore, COLLIDE as CQ, queryGrid } from './collide.js';
 import {
-  M_BOTTOM, M_LEFT, M_RING, awayAt, tangentAt, normalAt, toLocal, fromLocal, paddleTrack, halfReach, isLost, isOutside,
+  M_BOTTOM, M_LEFT, M_RING, RING_FACE, awayAt, tangentAt, normalAt, toLocal, fromLocal, paddleTrack, halfReach, isLost, isOutside,
 } from './field.js';
 
 /** Catch grace around the paddle (units): embers are small, so they get a little more. */
 export const EMBER_GRACE = 6;
 export const DROP_GRACE = 4;
 /** Drop cell half size along the track / across it (ART.md: about 48 x 22). */
-export const DROP_HALF_U = 24;
-export const DROP_HALF_V = 11;
-export const EMBER_R = 3;
+export const DROP_HALF_U = DETAIL.DROP_HALF_U;
+export const DROP_HALF_V = DETAIL.DROP_HALF_V;
+export const EMBER_R = DETAIL.EMBER_R;
 /** Embers fan out along the track by this spacing when a brick breaks. */
 const EMBER_SPACING = 9;
 /** Magnet Mod: lateral pull on embers inside the radius (u/s^2) and the lateral speed cap. */
@@ -134,6 +135,19 @@ function onPaddle(ctx, hu, hv, grace) {
   return Math.abs(loc.u) <= halfReach(mc, p) + hu + grace;
 }
 
+/** Large tangent capsules need the curved paddle's radial projection at late angular corners. */
+function onDropPaddle(ctx) {
+  const w = ctx.world, info = w.readability;
+  const hu = info?.dropHalfU || DROP_HALF_U, hv = info?.dropHalfV || DROP_HALF_V;
+  if (!onPaddle(ctx, hu, hv, DROP_GRACE)) return false;
+  if (ctx.mc !== M_RING || !info?.small) return true;
+  // The legacy arc-distance box alone can accept a capsule past the paddle with a visible gap.
+  // Reject on the capsule's radial axis as well, keeping the existing catch grace.
+  const nearestAngle = Math.max(0, Math.abs(ctx.loc.u) / RING_FACE - w.paddle.span / 2);
+  const paddleProjection = (RING_FACE + PADDLE.H) * Math.cos(nearestAngle);
+  return RING_FACE - ctx.loc.v - hv <= paddleProjection + DROP_GRACE;
+}
+
 /** isLost(r) or isOutside(margin) for the body at (ctx.bx, ctx.by). */
 function gone(ctx, r, margin) {
   const x = ctx.bx, y = ctx.by;
@@ -176,7 +190,7 @@ export function stepEmbers(ctx) {
     E.y[i] += E.vy[i] * dt;
     ctx.bx = E.x[i];
     ctx.by = E.y[i];
-    if (w.phase !== 'over' && onPaddle(ctx, EMBER_R, EMBER_R, EMBER_GRACE)) {
+    if (w.phase !== 'over' && onPaddle(ctx, w.readability?.emberR || EMBER_R, w.readability?.emberR || EMBER_R, EMBER_GRACE)) {
       E.alive[i] = 0;
       emit(w.bus, EV.EMBER_CAUGHT, i, E.x[i], E.y[i]);
       continue;
@@ -207,12 +221,17 @@ export function stepDrops(ctx) {
     d.y += d.vy * dt;
     ctx.bx = d.x;
     ctx.by = d.y;
-    if (w.phase !== 'over' && onPaddle(ctx, DROP_HALF_U, DROP_HALF_V, DROP_GRACE)) {
+    if (w.phase !== 'over' && onDropPaddle(ctx)) {
       d.alive = false;
       emit(w.bus, EV.DROP_CAUGHT, i, d.x, d.y, d.kind);
       continue;
     }
-    if (gone(ctx, DROP_HALF_U, 60)) {
+    // A large phone capsule may still meet the paddle after its centre crosses the loss ring.
+    // Keep it until the whole radial footprint leaves; legacy desktop cleanup is unchanged.
+    const lost = mc === M_RING && w.readability?.small
+      ? Math.hypot(d.x - RING.CX, d.y - RING.CY) > RING.R_LOSS + w.readability.dropHalfV
+      : gone(ctx, w.readability?.dropHalfU || DROP_HALF_U, 60);
+    if (lost) {
       d.alive = false;
       emit(w.bus, EV.DROP_MISSED, i, d.x, d.y, d.kind);
     }

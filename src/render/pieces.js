@@ -95,6 +95,15 @@ export function createPieces(scene, M) {
   root.add(lasers, laserGlows, bombs, bombRings, slagCores, slagCrust, slagRims,
     sentryBody, sentryRing, sentryEye, sentryGlow, aim, shieldBar, shieldRing);
 
+  // Phone-only warning rims are decoration outside the unchanged damage body.
+  const warningDark = inst(new THREE.RingGeometry(0.68, 1, 48), new THREE.MeshBasicMaterial({ color: 0x08090c, depthWrite: false }), POOL.HAZARDS, 2);
+  const warningRing = inst(new THREE.RingGeometry(0.78, 1, 48), new THREE.MeshBasicMaterial({ color: new THREE.Color(2.4, 0.16, 0.24), depthWrite: false }), POOL.HAZARDS, 3);
+  const droneOutline = inst(new THREE.RingGeometry(0.78, 1, 40), new THREE.MeshBasicMaterial({ color: 0xb1b8c2, depthWrite: false }), POOL.SENTRIES, 1);
+  const bomberOutline = inst(new THREE.RingGeometry(0.78, 1, 4), droneOutline.material, POOL.SENTRIES, 1);
+  bomberOutline.name = 'phone-bomber-outlines';
+  warningDark.name = 'phone-hazard-backing'; warningRing.name = 'phone-hazard-rims'; droneOutline.name = 'phone-sentry-outlines';
+  root.add(warningDark, warningRing, droneOutline, bomberOutline);
+  let info = { small: false, scale: 1 };
   let mode = 'bottom';
   let shieldFlashT = -1e9;
 
@@ -120,11 +129,19 @@ export function createPieces(scene, M) {
   }
 
   function setHazards(world, alpha, t) {
-    let nb = 0, ns = 0;
+    let nb = 0, ns = 0, nw = 0;
     for (let i = 0; i < world.hazards.length; i++) {
       const h = world.hazards[i];
       if (!h.alive) continue;
       const s = (h.r || 10) / 10;
+      if (info.small) {
+        const radius = (h.r || 10) + 2.5 / info.scale;
+        pos.set(lerp(h.px, h.x, alpha) - HW, HH - lerp(h.py, h.y, alpha), 1);
+        scl.set(radius + 0.8 / info.scale, radius + 0.8 / info.scale, 1);
+        m4.compose(pos, qId, scl); warningDark.setMatrixAt(nw, m4);
+        scl.set(radius, radius, 1); pos.z = 1.1;
+        m4.compose(pos, qId, scl); warningRing.setMatrixAt(nw++, m4);
+      }
       pos.set(lerp(h.px, h.x, alpha) - HW, HH - lerp(h.py, h.y, alpha), 0);
       scl.set(s, s, s);
       if ((h.kind | 0) === 1) {
@@ -146,6 +163,8 @@ export function createPieces(scene, M) {
         nb++;
       }
     }
+    warningDark.count = nw; warningRing.count = nw;
+    warningDark.instanceMatrix.needsUpdate = true; warningRing.instanceMatrix.needsUpdate = true;
     bombs.count = nb;
     bombRings.count = nb;
     slagCores.count = ns;
@@ -159,12 +178,18 @@ export function createPieces(scene, M) {
   }
 
   function setSentries(world, alpha, t) {
-    let n = 0;
+    let n = 0, nd = 0, nb = 0;
     for (let i = 0; i < world.sentries.length; i++) {
       const s = world.sentries[i];
       if (!s.alive) continue;
       const k = (s.r || 16) / 16;
       const x = lerp(s.px, s.x, alpha) - HW, y = HH - lerp(s.py, s.y, alpha);
+      if (info.small) {
+        pos.set(x, y, 1); scl.set(s.r || 16, s.r || 16, 1);
+        m4.compose(pos, qId, scl);
+        if (s.kind === 1) bomberOutline.setMatrixAt(nb++, m4);
+        else droneOutline.setMatrixAt(nd++, m4);
+      }
       pos.set(x, y, 0);
       quat.setFromAxisAngle(zAxis, t * 0.6 + i);
       scl.set(k, k, k * 0.7);
@@ -177,12 +202,19 @@ export function createPieces(scene, M) {
       const ex = Math.cos(s.eye || Math.PI / 2) * 7 * k, ey = -Math.sin(s.eye || Math.PI / 2) * 7 * k;
       pos.set(x + ex, y + ey, 8 * k);
       m4.compose(pos, qId, scl);
+      if (info.small) {
+        const eyeSize = Math.max(k, 4 / (6.4 * info.scale));
+        scl.set(eyeSize, eyeSize, eyeSize); m4.compose(pos, qId, scl);
+      }
       sentryEye.setMatrixAt(n, m4);
+      scl.set(k, k, k);
       pos.z = 12 * k;
       m4.compose(pos, qId, scl);
       sentryGlow.setMatrixAt(n, m4);
       n++;
     }
+    droneOutline.count = nd; droneOutline.instanceMatrix.needsUpdate = true;
+    bomberOutline.count = nb; bomberOutline.instanceMatrix.needsUpdate = true;
     for (const m of sentryMeshes) {
       m.count = n;
       m.instanceMatrix.needsUpdate = true;
@@ -218,6 +250,7 @@ export function createPieces(scene, M) {
   }
 
   return {
+    setReadability(value) { info = value; },
     setWorld(world) {
       mode = world.level.mode;
       shieldFlashT = -1e9;

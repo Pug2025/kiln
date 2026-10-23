@@ -37,6 +37,7 @@ import { createBoss } from './boss.js';
 import { isBossCore, isBossDeflector } from './boss-feedback.js';
 import { createHeadroom } from './headroom.js';
 import { createFx } from './fx.js';
+import { createReadability, updateReadability } from '../core/readability.js';
 import { createRig } from './rig.js';
 import { createPost } from './post.js';
 import { loadKit } from './kit.js';
@@ -128,6 +129,7 @@ export async function createRenderer(host, opts = {}) {
   const overlays = createOverlays(scene);
   const headroom = createHeadroom(scene);
   const rig = createRig(camera);
+  const details = createReadability();
   const post = createPost(gl, scene, camera);
   // every instanced pool: an empty one is hidden before the draw, so three neither sets up its
   // program nor issues a zero-instance draw call (review 2026-10-22)
@@ -214,6 +216,9 @@ export async function createRenderer(host, opts = {}) {
     gl.setPixelRatio(pr);
     gl.setSize(width, height, false);
     rig.resize(width, height);
+    updateReadability(width, height, rig.fit.rect.scale * 0.9, details);
+    bricks.setReadability(details);
+    pieces.setReadability(details);
     restPose(restCam, rig.fit.dist, rig.fit.look, width / height, rig.fit.centreX);
     headroom.layout(restCam, width, height, rig.fitOpts.frame);
     // fog follows the fitted distance (C call): phones fit the field farther away, and a fixed fog
@@ -370,6 +375,7 @@ export async function createRenderer(host, opts = {}) {
       }
     });
     try {
+      actors.warmTextures(gl);
       // both output paths: straight to the canvas (lite: ACES + sRGB in each shader) and into the
       // composer's target (bloom: linear, no tone mapping). three compiles a separate program for
       // each, and a first drop or burst on the bloom path cost a 80-150 ms compile under 4x throttle.
@@ -600,6 +606,8 @@ export async function createRenderer(host, opts = {}) {
     },
 
     resize,
+
+    detailInfo(out) { return Object.assign(out, details); },
 
     /**
      * D's reserves: keep `top` CSS px clear above the field (the HUD band on tablet portrait,

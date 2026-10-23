@@ -6,6 +6,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { FIELD, BALL, EMBERS, DROPS, RING, PADDLE, DROP, DROP_FAMILY } from '../core/constants.js';
+import { DETAIL, dropRotation } from '../core/readability.js';
 import { LOOK } from './look.js';
 import { PAL, glassMaterial } from './materials.js';
 import { withOutput } from './shaders.js';
@@ -42,7 +43,7 @@ export function bendable(material, key) {
 }
 
 /** Procedural drop glyph atlas (4 x 3 cells of 128, DROP_NAMES order) until F's atlas loads. */
-function proceduralDropAtlas() {
+function proceduralDropAtlas(tight = false) {
   const cs = 128;
   const c = document.createElement('canvas');
   c.width = cs * 4;
@@ -74,7 +75,23 @@ function proceduralDropAtlas() {
     draw[i]((i % 4) * cs + cs / 2, Math.floor(i / 4) * cs + cs / 2);
     g.stroke();
   }
-  const t = new THREE.CanvasTexture(c);
+  let source = c;
+  if (tight) {
+    const phone = document.createElement('canvas'); phone.width = c.width; phone.height = c.height;
+    const pg = phone.getContext('2d'); pg.fillStyle = '#000'; pg.fillRect(0, 0, phone.width, phone.height);
+    for (let k = 0; k < 12; k++) {
+      const ox = (k % 4) * cs, oy = Math.floor(k / 4) * cs;
+      const pixels = g.getImageData(ox, oy, cs, cs).data;
+      let x0 = cs, y0 = cs, x1 = 0, y1 = 0;
+      for (let y = 0; y < cs; y++) for (let x = 0; x < cs; x++) if (pixels[(y * cs + x) * 4] > 64) {
+        x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y);
+      }
+      const w = x1 - x0 + 1, h = y1 - y0 + 1, fit = (cs - 12) / Math.max(w, h);
+      pg.drawImage(c, ox + x0, oy + y0, w, h, ox + (cs - w * fit) / 2, oy + (cs - h * fit) / 2, w * fit, h * fit);
+    }
+    source = phone;
+  }
+  const t = new THREE.CanvasTexture(source);
   t.colorSpace = THREE.SRGBColorSpace;
   t.minFilter = THREE.LinearMipmapLinearFilter;
   return t;
@@ -268,6 +285,7 @@ export function createActors(scene, M) {
   const emberGeo = new THREE.DodecahedronGeometry(3.6, 0);
   emberGeo.setAttribute('aHeat', new THREE.InstancedBufferAttribute(new Float32Array(EMBERS.MAX_LIVE).fill(0.8), 1));
   const embers = new THREE.InstancedMesh(emberGeo, M.core, EMBERS.MAX_LIVE);
+  embers.name = 'ember-pickups';
   embers.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   embers.frustumCulled = false;
   embers.count = 0;
@@ -282,8 +300,13 @@ export function createActors(scene, M) {
   root.add(embers, streaks);
 
   // ---------------------------------------------------------------- drops (48 x 22 dark cells, lit glyph)
+  // Pickups have their own unclipped matte. The shared brick matte carries the wall's ceiling
+  // clip, whose first-use variant three's compile-only warm-up misses on an empty pickup pool.
+  const dropMatte = M.matte.clone();
+  dropMatte.clippingPlanes = null;
+  M.dropMatte = dropMatte;
   const dropShell = new THREE.InstancedMesh(new RoundedBoxGeometry(48, 22, 14, 3, 4), M.wallGlassI, DROPS.MAX_LIVE);
-  const dropCore = new THREE.InstancedMesh(new RoundedBoxGeometry(41, 15, 8, 2, 2.5), M.matte, DROPS.MAX_LIVE);
+  const dropCore = new THREE.InstancedMesh(new RoundedBoxGeometry(41, 15, 8, 2, 2.5), dropMatte, DROPS.MAX_LIVE);
   const megaGeo = new RoundedBoxGeometry(41, 15, 8, 2, 2.5);
   megaGeo.setAttribute('aHeat', new THREE.InstancedBufferAttribute(new Float32Array(DROPS.MAX_LIVE).fill(1.0), 1));
   const dropMega = new THREE.InstancedMesh(megaGeo, M.core, DROPS.MAX_LIVE);
@@ -296,17 +319,18 @@ export function createActors(scene, M) {
   glyphGeo.setAttribute('aTint', aTint);
   const dropAtlas = proceduralDropAtlas();
   M.tex.drops = dropAtlas;
+  const phoneDropAtlas = proceduralDropAtlas(true);
   const glyphMat = new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: false,
-    uniforms: { uAtlas: { value: dropAtlas } },
+    uniforms: { uAtlas: { value: dropAtlas }, uPhoneAtlas: { value: phoneDropAtlas }, uSmall: { value: 0 } },
     vertexShader: `attribute float aKind; attribute vec3 aTint; varying vec2 vUv; varying vec3 vTint;
       void main(){
         float k = floor(aKind + 0.5); float c = mod(k, 4.0); float r = floor(k / 4.0);
         vUv = vec2((c + uv.x) / 4.0, 1.0 - (r + 1.0 - uv.y) / 3.0); vTint = aTint;
         gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.0); }`,
-    fragmentShader: withOutput(`precision highp float; varying vec2 vUv; varying vec3 vTint; uniform sampler2D uAtlas;
-      void main(){ vec4 s = texture2D(uAtlas, vUv); float m = max(s.a * max(s.r, max(s.g, s.b)), 0.0);
+    fragmentShader: withOutput(`precision highp float; varying vec2 vUv; varying vec3 vTint; uniform sampler2D uAtlas; uniform sampler2D uPhoneAtlas; uniform float uSmall;
+      void main(){ vec4 s = uSmall > 0.5 ? texture2D(uPhoneAtlas, vUv) : texture2D(uAtlas, vUv); float m = max(s.a * max(s.r, max(s.g, s.b)), 0.0);
         m = smoothstep(0.15, 0.6, m); if (m < 0.01) discard; gl_FragColor = vec4(vTint * m, m); }`),
   });
   const dropGlyphs = new THREE.InstancedMesh(glyphGeo, glyphMat, DROPS.MAX_LIVE);
@@ -318,6 +342,11 @@ export function createActors(scene, M) {
   }
   dropShell.renderOrder = 5;
   dropGlyphs.renderOrder = 1;
+  const phoneDropBack = new THREE.InstancedMesh(new RoundedBoxGeometry(1, 1, 0.1, 2, 0.08), dropMatte, DROPS.MAX_LIVE);
+  phoneDropBack.name = 'phone-drop-backing'; phoneDropBack.count = 0; phoneDropBack.frustumCulled = false;
+  phoneDropBack.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  root.add(phoneDropBack);
+  dropShell.name = 'drop-shells'; dropCore.name = 'drop-cores'; dropGlyphs.name = 'drop-glyphs';
   root.add(dropShell, dropCore, dropMega, dropGlyphs);
 
   let mode = 'bottom';
@@ -456,7 +485,8 @@ export function createActors(scene, M) {
       const y = HH - lerp(E.py[i], E.y[i], alpha);
       quat.setFromAxisAngle(zAxis, (E.bornMs[i] * 0.01 + i) % 6.283);
       pos.set(x, y, 0);
-      scl.set(1, 1, 1);
+      const size = world.readability?.small ? world.readability.emberR / 3.6 : 1;
+      scl.set(size, size, size);
       m4.compose(pos, quat, scl);
       embers.setMatrixAt(n, m4);
       // a short streak behind the motion
@@ -477,36 +507,51 @@ export function createActors(scene, M) {
 
   function setDrops(world, alpha) {
     let n = 0, nm = 0;
-    // drops keep the brick slab's orientation: turned in left mode, level otherwise
-    quat.setFromAxisAngle(zAxis, mode === 'left' ? -Math.PI / 2 : 0);
+    const info = world.readability;
+    const small = !!info?.small, scale = info?.scale || 1;
+    glyphMat.uniforms.uSmall.value = small ? 1 : 0;
+    // Capsules use their actual track/radial catch footprint; the icon stays upright.
     for (let i = 0; i < world.drops.length; i++) {
       const d = world.drops[i];
       if (!d.alive) continue;
-      pos.set(lerp(d.px, d.x, alpha) - HW, HH - lerp(d.py, d.y, alpha), 0);
-      scl.set(1, 1, 1);
+      const x = lerp(d.px, d.x, alpha), y = lerp(d.py, d.y, alpha);
+      const hu = info?.dropHalfU || 24, hv = info?.dropHalfV || 11;
+      const rotation = small ? dropRotation(mode, x, y) : mode === 'left' ? -Math.PI / 2 : 0;
+      quat.setFromAxisAngle(zAxis, rotation);
+      pos.set(x - HW, HH - y, 0);
+      scl.set(hu / 24, hv / 11, 1);
       m4.compose(pos, quat, scl);
       dropShell.setMatrixAt(n, m4);
       const kind = d.kind | 0;
+      if (small) scl.set((hu * 2 - 6 / scale) / 41, (hv * 2 - 4 / scale) / 15, 1);
+      m4.compose(pos, quat, scl);
       if (kind === DROP.MEGA) dropMega.setMatrixAt(nm++, m4);
       else dropCore.setMatrixAt(n - nm, m4);
-      // glyph upright on the inner plane
-      pos.z = 4.6;
+      if (small) {
+        pos.z = 7.2; scl.set(28 / scale, 28 / scale, 1);
+        m4.compose(pos, qId, scl); phoneDropBack.setMatrixAt(n, m4);
+      }
+      pos.z = small ? 7.4 : 4.6;
+      const glyphSize = small ? DETAIL.DROP_GLYPH_PX * (128 / 116) / scale / 17 : 1;
+      scl.set(glyphSize, glyphSize, 1);
       m4.compose(pos, qId, scl);
       dropGlyphs.setMatrixAt(n, m4);
       aKind.array[n] = kind;
       tintFor(kind, col);
+      if (small) {
+        if (DROP_FAMILY[kind] === 'warn') col.setRGB(2.4, 0.16, 0.24);
+        else if (DROP_FAMILY[kind] === 'cold') col.multiplyScalar(0.8);
+        else col.setRGB(0.85, 0.83, 0.80);
+      }
       aTint.array[n * 3] = col.r;
       aTint.array[n * 3 + 1] = col.g;
       aTint.array[n * 3 + 2] = col.b;
       n++;
     }
-    dropShell.count = n;
-    dropGlyphs.count = n;
-    dropMega.count = nm;
-    dropCore.count = n - nm;
+    phoneDropBack.count = small ? n : 0; phoneDropBack.instanceMatrix.needsUpdate = true;
+    dropShell.count = n; dropGlyphs.count = n; dropMega.count = nm; dropCore.count = n - nm;
     for (let k = 0; k < dropMeshes.length; k++) dropMeshes[k].instanceMatrix.needsUpdate = true;
-    aKind.needsUpdate = true;
-    aTint.needsUpdate = true;
+    aKind.needsUpdate = true; aTint.needsUpdate = true;
   }
 
   return {
@@ -536,6 +581,14 @@ export function createActors(scene, M) {
     setDropAtlas(tex) {
       glyphMat.uniforms.uAtlas.value = tex;
       dropAtlas.dispose();
+    },
+
+    /** Compile alone does not upload samplers on an empty pool. Prepare them before play. */
+    warmTextures(gl) {
+      gl.initTexture(glyphMat.uniforms.uAtlas.value);
+      gl.initTexture(phoneDropAtlas);
+      if (dropMatte.map) gl.initTexture(dropMatte.map);
+      if (dropMatte.normalMap) gl.initTexture(dropMatte.normalMap);
     },
 
     frame(world, alpha, t, fire, dt) {

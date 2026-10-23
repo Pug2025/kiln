@@ -199,6 +199,7 @@ async function boot() {
         setReserve(top, bottom);
       }
     }
+    if (app.world && renderer.detailInfo) renderer.detailInfo(app.world.readability);
     ui.layout(rect);
     if (app.flame && app.flame.resize) app.flame.resize();
   }
@@ -306,6 +307,7 @@ async function boot() {
     // the renderer refits for the world's field mode, and the Overload button's room comes and goes
     // with HEAT: lay out again (with the reserves) when either changes, not for every attract world
     if (trayWanted() !== !!app.tray || world.level.mode !== app.layoutMode) layout();
+    else if (renderer.detailInfo) renderer.detailInfo(world.readability);
     resetReader(uiEvents, world.bus, world.bus.head);
     ui.resetHud();
     window.__kiln.world = world;

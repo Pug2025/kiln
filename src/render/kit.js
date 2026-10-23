@@ -81,7 +81,7 @@ export async function loadKit(h, base = KIT_BASE) {
   // indestructible matte black: a very low-contrast obsidian detail (it still reflects nothing)
   jobs.push(Promise.all([tex('textures/obsidian.png', true), tex('textures/obsidian_n.png', false)]).then(([o, on]) => {
     if (!o) return;
-    for (const m of [M.matte, M.matteP]) {
+    for (const m of [M.matte, M.matteP, M.dropMatte]) {
       if (!m) continue;
       m.map = o;
       if (on) {

@@ -283,6 +283,7 @@ export function createBricks(scene, M) {
   return {
     root,
     marks,
+    setReadability(info) { marks.setReadability(info); version = -1; },
 
     setWorld(w) {
       world = w;

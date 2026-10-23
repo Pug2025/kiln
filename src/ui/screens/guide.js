@@ -2,6 +2,7 @@ import { h } from '../dom.js';
 import { panel, button } from './parts.js';
 
 export const GUIDE = Object.freeze([
+  ['Bricks', 'A number or group of dots shows hits left. Silver edges mark armour. Locked bricks cannot break.'],
   ['Embers', 'The small glowing chips fill HEAT and build your score multiplier when caught. They also become permanent currency for The Forge. Earlier misses stay missed.'],
   ['Power drops', 'The larger marked cells change your paddle or balls for this level: Wide, Multi, Laser and more. Red-marked drops are penalties. Laser adds two emitters; each quick action fires a pair of bolts. A held ball launches first.'],
   ['HEAT', 'From level 7, hold Pull to draw the ball toward you. Spending 100 HEAT buys one Shield per level: one saved miss, lasting 20 seconds. From level 22, your chosen Overload spends HEAT on Purge, Quench or Fork instead.'],

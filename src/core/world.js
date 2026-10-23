@@ -24,6 +24,7 @@
 // single writer each (see src/core/types.js). Read src/ARCHITECTURE.md before changing any of it.
 
 import { SIM, FIELD, GRID, PADDLE, BALL, EMBERS, DROPS, POOL, HEAT, DROP_COUNT, LIVES, RING } from './constants.js';
+import { createReadability } from './readability.js';
 import { EV, PHASE_CODE } from './events.js';
 import { createBus, emit } from './bus.js';
 import { createRng } from './rng.js';
@@ -165,6 +166,7 @@ export function createWorld({ level, seed = 1, run = null, systems = {} }) {
     phase: 'serve',
     phaseMs: 0,
     timeScale: 1,
+    readability: createReadability(),
     level: {
       def: level,
       n: level.n | 0,

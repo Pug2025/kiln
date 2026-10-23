@@ -493,6 +493,7 @@
  * @property {number} phaseMs     sim time when the phase began (core)
  * @property {number} timeScale   real-time scale for main.js's accumulator (A: slow-mo)
  * @property {LevelState} level
+ * @property {{small:boolean,width:number,height:number,scale:number,dropHalfU:number,dropHalfV:number,emberR:number}} readability  stable CSS view/catch facts (D writes at layout)
  * @property {PlayField} field    the ceiling / far wall (A, set once at level start)
  * @property {Paddle} paddle
  * @property {Ball[]} balls
@@ -538,6 +539,7 @@
  * @property {(on:boolean) => void} setMenu        blur 40 px + dim 35% behind menus
  * @property {(clientX:number, clientY:number, out:{x:number,y:number}) => boolean} screenToField
  * @property {(out:FieldRect) => FieldRect} fieldRect
+ * @property {(out:object) => object} [detailInfo] (C) stable CSS detail sizes; D copies them to world.readability at layout
  * @property {(r:{top?:number, bottom?:number}) => void} [setReserve]   (C) CSS px kept clear above (HUD) and under (touch Overload) the field; next resize() applies it
  * @property {{frameMs:number, calls:number, triangles:number}} stats
  * @property {() => void} dispose
