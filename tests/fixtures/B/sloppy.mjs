@@ -1,5 +1,6 @@
 // B's test player: A's robot (no perfect hits) seen through a reaction lag and an aim error that
-// drifts, a stand-in for a person who is good but not exact. Deterministic for a seed.
+// drifts. It still plans shots with full geometry; it is not a model of human discovery or
+// ability. Deterministic for a seed.
 
 import { SIM } from '../../../src/core/constants.js';
 import { createRobot } from '../../../src/sim/robot.js';

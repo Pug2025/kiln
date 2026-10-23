@@ -34,6 +34,7 @@ import { createPieces } from './pieces.js';
 import { createOverlays } from './overlays.js';
 import { createTrail } from './trail.js';
 import { createBoss } from './boss.js';
+import { isBossCore, isBossDeflector } from './boss-feedback.js';
 import { createHeadroom } from './headroom.js';
 import { createFx } from './fx.js';
 import { createRig } from './rig.js';
@@ -142,7 +143,7 @@ export async function createRenderer(host, opts = {}) {
   }).then(() => {
     // the kit swapped maps into materials (new programs) and added the boss meshes: compile them
     // now, not at the first break, drop or boss of play
-    if (!disposed) warmUp();
+    if (!disposed) { boss.refreshMaps(); warmUp(); }
   }).catch(() => {});
   let disposed = false;
   // a lost WebGL context (GPU reset, too many contexts): stop drawing, say so, and when three has
@@ -243,7 +244,9 @@ export async function createRenderer(host, opts = {}) {
       const r = reader;
       switch (r.type) {
         case EV.BRICK_HIT:
-          fx.burst(r.x - HW, HH - r.y, 10, 6, 1, 200, 6);
+          // Core contact alone may be ignored. Its actual outcome owns all feedback below.
+          if (isBossDeflector(world, r.id)) fx.blocked(r.x - HW, HH - r.y);
+          else if (!isBossCore(world, r.id)) fx.burst(r.x - HW, HH - r.y, 10, 6, 1, 200, 6);
           break;
         case EV.BRICK_DAMAGED:
           bricks.hit(r.id, t);
@@ -289,7 +292,7 @@ export async function createRenderer(host, opts = {}) {
           pieces.shieldUsed(t);
           break;
         case EV.LASER_FIRED:
-          fx.burst(r.x - HW, HH - r.y, 2, 4, 0.8, 120, 4);
+          actors.laserFired(t);
           break;
         case EV.PORTAL:
           fx.burst(r.x - HW, HH - r.y, 6, 10, 1, 160, 5);
@@ -309,8 +312,15 @@ export async function createRenderer(host, opts = {}) {
           breakBoost = Math.max(breakBoost, 0.6);
           break;
         case EV.BOSS_HIT:
+          bricks.hit(r.id, t);
           fx.burst(r.x - HW, HH - r.y, 8, 16, 1.2, 220, 7);
           fire.flare(0.5);
+          break;
+        case EV.BOSS_BLOCKED:
+          fx.blocked(r.x - HW, HH - r.y);
+          break;
+        case EV.BOSS_GUARD:
+          bricks.coreGuard(r.id, !!r.a);
           break;
         case EV.BOSS_PHASE:
           headroom.bossPulse();

@@ -20,6 +20,7 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { FIELD, POOL, BRICK, BF, GRID } from '../core/constants.js';
 import { LOOK } from './look.js';
 import { createMarks } from './marks.js';
+import { isBossCore, coreProtected, CORE_COOL_HEAT } from './boss-feedback.js';
 
 const HW = FIELD.W / 2;
 const HH = FIELD.H / 2;
@@ -199,7 +200,8 @@ export function createBricks(scene, M) {
       slotOf[i] = -1;
       grpOf[i] = -1;
       if (!B.alive[i] || (B.flags[i] & BF.HIDDEN)) continue;
-      const g = groupOf(B.type[i], B.flags[i]);
+      // The first boss's permanent head is dark, while its breakable chin stays titanium.
+      const g = world.boss?.id === 'stoker' && B.type[i] === BRICK.BOSS ? G_MATTE : groupOf(B.type[i], B.flags[i]);
       const gr = cur.groups[g];
       const slot = gr.live++;
       gr.brickOf[slot] = i;
@@ -249,7 +251,7 @@ export function createBricks(scene, M) {
         const k = 0.5 + 0.5 * Math.sin(t * LOOK.EXPLOSIVE_RATE + i * 0.7);
         return LOOK.EXPLOSIVE_LO + (LOOK.EXPLOSIVE_HI - LOOK.EXPLOSIVE_LO) * k;
       }
-      case BRICK.WEAK: return LOOK.HEAT_WEAK;
+      case BRICK.WEAK: return isBossCore(world, i) && coreProtected(world) ? CORE_COOL_HEAT : LOOK.HEAT_WEAK;
       case BRICK.CARRIER: case BRICK.CAVITY: case BRICK.GRAVITY: case BRICK.PORTAL:
         return inMotionRow[i] ? LOOK.HEAT_MOVING : LOOK.HEAT_SPECIAL;
       default: return 0.12;
@@ -258,6 +260,7 @@ export function createBricks(scene, M) {
 
   /** Extra heat from hits, re-forming and the level-clear sweep. */
   function extraHeat(i, y, t) {
+    if (isBossCore(world, i) && coreProtected(world)) return 0;
     let h = 0;
     const kf = (t - flashT[i]) / LOOK.HIT_FLASH_S;
     if (kf >= 0 && kf < 1) h += LOOK.HIT_FLASH * (1 - kf);
@@ -316,6 +319,11 @@ export function createBricks(scene, M) {
       }
       marks.hit(i, t);
     },
+    coreGuard(i, active) {
+      // Readiness itself is evaluated every frame from sim time, including cooldown expiry
+      // without a structural version change. Reopening never replays an old hit flash.
+      if (!active && i >= 0 && i < POOL.BRICKS) flashT[i] = -1e9;
+    },
     spawned(i, t) {
       if (i >= 0 && i < POOL.BRICKS) spawnT[i] = t;
     },
@@ -335,7 +343,7 @@ export function createBricks(scene, M) {
       r.h = i >= 0 ? B.h[i] : 30;
       r.type = type;
       r.tier = i >= 0 ? B.tier[i] : 1;
-      r.g = groupOf(type, i >= 0 ? B.flags[i] & ~BF.CAVITY_BALL : 0);
+      r.g = world.boss?.id === 'stoker' && type === BRICK.BOSS ? G_MATTE : groupOf(type, i >= 0 ? B.flags[i] & ~BF.CAVITY_BALL : 0);
       r.heat = i >= 0 && grpOf[i] >= 0 ? baseHeat(i, t) : 0.5;
       r.t0 = t;
       r.burn = burn;

@@ -384,6 +384,18 @@ export function createPhysics() {
       world.api.spawnBall = spawnBall;
       world.api.splitBalls = splitBalls;
       world.api.spawnEmbers = (x, y, n) => spawnEmbers(ctx, x, y, n);
+      world.api.settlePickups = () => {
+        let remaining = 0;
+        const alive = world.embers.alive;
+        for (let i = 0; i < alive.length; i++) {
+          if (alive[i]) { remaining++; alive[i] = 0; }
+        }
+        world.embers.count = 0;
+        // Power capsules have no use once a level is won. Clearing their visuals must not
+        // apply an effect (especially a bad drop) or pretend they were caught by the paddle.
+        for (const drop of world.drops) drop.alive = false;
+        return remaining;
+      };
       world.api.spawnDrop = (x, y, kind) => spawnDrop(ctx, x, y, kind);
       world.api.spawnHazard = (x, y, vx, vy, kind, r) => spawnHazard(ctx, x, y, vx, vy, kind, r);
       world.paddle.w = world.effects.paddleW > 0 ? world.effects.paddleW : world.paddle.w;

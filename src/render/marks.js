@@ -289,6 +289,10 @@ export function createMarks(root, M) {
               add(ID.clampMark, i, 0, -halfH - 1, 7.2, sq ? 0.5 : 1, 1);
               break;
             case BRICK.ARMOURED: {
+              if (f & BF.BOSS) {
+                const digit = add(ID.glyphs, i, 0, 0, zFront + 0.2, 1, 1, 1);
+                glyphCell.array[eSlot[digit]] = Math.max(1, Math.min(9, B.hp[i]));
+              }
               const hits = Math.max(0, (B.hpMax[i] || 3) - Math.max(0, B.hp[i]));
               const n = Math.min(SEAM_X.length, 1 + hits);
               for (let s = 0; s < n; s++) {

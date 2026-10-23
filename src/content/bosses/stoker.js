@@ -3,9 +3,9 @@
 // A furnace head of titanium plates ('B' cells) with a white-hot core ('W') inside its mouth and a
 // chin row of armoured jaw plates ('A' cells). Break jaw plates to open the mouth, then hit the core.
 //   phase 1 (core 5 → 4): the head is still; a slag blob every 3.5 s, aimed at the paddle.
-//   phase 2 (core 4 → 0): the jaw slams shut (plates regrow once no ball is inside the head) and
-//                         shuts again behind every ball that scores, never on a timer (an open
-//                         jaw stays open until a ball uses it); the head sways side to side and
+//   phase 2 (core 4 → 0): broken jaw plates reform once, after every ball has left the head.
+//                         Later openings stay open: core progress never buys another full jaw.
+//                         The head sways side to side and
 //                         spits a blob every 3 s, two at once for the last hit.
 // The core is one fused brick and counts at most two hits per entry (common.js hitCore).
 // Slag is a hazard; a paddle hit knocks HEAT out of the meter (content.js).
@@ -17,6 +17,7 @@ import { resetBoss, hitCore, startCascade, stepCascade, indicesWhere, centreOf, 
 
 export const STOKER = Object.freeze({
   HP: 5,
+  JAW_HP: 2,                // first-boss armour; ordinary A cells elsewhere still take 3 hits
   PHASE2_AT: 4,             // core hits left when phase 2 starts
   SLAG_MS: [3500, 3000],    // per phase
   TWIN_AT: 1,               // core hits left from which every spit is two blobs
@@ -39,7 +40,6 @@ export function createStoker() {
   let core = new Int16Array(0);
   let cx = 360, cy = 200, mouthX = 360, chinY = 300;
   let boxTop = 0, boxBottom = 0, boxHalfW = 0;
-  let regrow = false;
   let swaying = false;
   const v = { x: 0, y: 0 };
 
@@ -51,21 +51,24 @@ export function createStoker() {
 
   function tryRegrow(world) {
     const B = world.bricks;
-    regrow = false;
+    const d = world.boss.data;
+    d.jawRepairPending = false;
     // never shut the jaw on a ball: wait until no ball is inside the head
     const off = world.boss.x - cx;
     if (ctx.ballNear(cx + off, (boxTop + boxBottom) / 2, boxHalfW, (boxBottom - boxTop) / 2)) {
-      regrow = true;
+      d.jawRepairPending = true;
       return;
     }
     for (let k = 0; k < jaw.length; k++) {
       const i = jaw[k];
       if (B.alive[i]) continue;
-      if (ctx.ballNear(B.x[i], B.y[i], B.w[i] / 2, B.h[i] / 2)) { regrow = true; continue; }
+      if (ctx.ballNear(B.x[i], B.y[i], B.w[i] / 2, B.h[i] / 2)) { d.jawRepairPending = true; continue; }
       ctx.spawnBrick(i, 'A', B.x[i], B.y[i], B.w[i], B.h[i], B.col[i], B.row[i]);
+      B.hp[i] = B.hpMax[i] = STOKER.JAW_HP;
       B.flags[i] |= BF.BOSS | (swaying ? BF.MOVING : 0);
       B.group[i] = STOKER_PARTS.JAW;
     }
+    d.jawRepairDone = !d.jawRepairPending;
   }
 
   function spit(world) {
@@ -94,6 +97,7 @@ export function createStoker() {
       for (const i of head) B.group[i] = STOKER_PARTS.HEAD;
       for (const i of jawList) {
         B.group[i] = STOKER_PARTS.JAW;
+        B.hp[i] = B.hpMax[i] = STOKER.JAW_HP;
         B.flags[i] |= BF.BOSS;
       }
       for (const i of coreList) B.group[i] = STOKER_PARTS.CORE;
@@ -109,9 +113,12 @@ export function createStoker() {
       boxTop = Math.min(...[...all].map((i) => B.y[i] - B.h[i] / 2));
       boxBottom = chinY;
       boxHalfW = Math.max(...[...all].map((i) => Math.abs(B.x[i] - cx) + B.w[i] / 2));
-      regrow = false;
       swaying = false;
       resetBoss(world, 'stoker', STOKER.HP, cx, cy);
+      // Content owns these optional state facts; HUD/render only read them. No timer closes an
+      // unused opening, and after the single phase change no more repairs are scheduled.
+      world.boss.data.jawRepairPending = false;
+      world.boss.data.jawRepairDone = false;
       ctx.setRemaining(STOKER.HP);
     },
 
@@ -126,7 +133,7 @@ export function createStoker() {
         return;
       }
       boss.t += SIM.DT_MS;
-      if (regrow) tryRegrow(world);
+      if (d.jawRepairPending) tryRegrow(world);
       if (swaying) {
         const B = world.bricks;
         const off = STOKER.SWAY * Math.sin((STOKER.SWAY_OMEGA * (world.time - d.phaseAt)) / 1000);
@@ -177,8 +184,6 @@ export function createStoker() {
         for (let k = 0; k < all.length; k++) B.flags[all[k]] |= BF.MOVING;
         B.version++;
         tryRegrow(world);
-      } else if (boss.phase === 2) {
-        regrow = true; // phase 2: the jaw shuts again behind every ball that scores (once it is out)
       }
     },
   };

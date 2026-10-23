@@ -17,7 +17,7 @@
 // suspend()/resume() are the game's pause: music ducks and muffles under the pause menu, menu
 // sounds still play. Volumes: setVolume({music, sfx, muted}) 0…1.
 
-import { DROP_FAMILY } from '../core/constants.js';
+import { DROP_FAMILY, BF, BRICK } from '../core/constants.js';
 import { EV } from '../core/events.js';
 import { createReader, resetReader, next } from '../core/bus.js';
 import { createSfx, SFX_FILES } from './sfx.js';
@@ -40,7 +40,7 @@ const COOLDOWN = Object.freeze({
   ballLost: 0.3, lifeLost: 0.3, lifeGained: 0.2, roar: 1.5, blast: 1.0, explosion: 0.06, laser: 0.05,
   overload: 0.2, shield: 0.1, clank: 0.05, bigClank: 0.08, hazard: 0.1, bossPhase: 0.5,
   portal: 0.08, land: 0.06, heatFull: 0.5, tick: 0.3, nearMiss: 0.2, cavity: 0.3, ui: 0.03,
-  victory: 2,
+  victory: 2, bossBlocked: 0.08,
 });
 const LENGTH = Object.freeze({
   brick: 0.45, hit: 0.15, paddle: 0.12, perfect: 0.26, wall: 0.04, ember: 0.08, combo: 0.6,
@@ -316,6 +316,10 @@ export function createAudio(opts = {}) {
   function handle(world, t) {
     const now = ctx.currentTime;
     switch (rd.type) {
+      case EV.BRICK_HIT:
+        // Permanent boss plates only deflect; they never get the ringing core-damage sound.
+        if (world?.boss?.id && world.bricks.type[rd.id] === BRICK.BOSS && (world.bricks.flags[rd.id] & BF.BOSS) && allow('bossBlocked', now)) sfx.bossBlocked(t, rd.x);
+        break;
       case EV.BRICK_BROKEN: {
         if (now - lastBrickAt < 1.5) rally = Math.min(9, rally + 1);
         else rally = 0;
@@ -402,6 +406,9 @@ export function createAudio(opts = {}) {
         break;
       case EV.BOSS_HIT:
         if (allow('bigClank', now)) sfx.clank(t, true, rd.x);
+        break;
+      case EV.BOSS_BLOCKED:
+        if (allow('bossBlocked', now)) sfx.bossBlocked(t, rd.x);
         break;
       case EV.BOSS_PHASE:
         if (allow('bossPhase', now)) sfx.bossPhase(t);

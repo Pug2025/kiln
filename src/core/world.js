@@ -214,6 +214,7 @@ export function createWorld({ level, seed = 1, run = null, systems = {} }) {
       mult: 1,
       levelScore: 0,
       embersCaught: 0,
+      embersAutoBanked: 0,
       dropsCaught: 0,
       bricksBroken: 0,
       overloadCost: HEAT.MAX,
@@ -263,6 +264,7 @@ export function createWorld({ level, seed = 1, run = null, systems = {} }) {
   api.splitBalls = missing(world, 'splitBalls', 0);
   api.serve = missing(world, 'serve', undefined);
   api.spawnEmbers = missing(world, 'spawnEmbers', 0);
+  api.settlePickups = missing(world, 'settlePickups', 0);
   api.spawnDrop = missing(world, 'spawnDrop', -1);
   api.spawnHazard = missing(world, 'spawnHazard', -1);
   api.damageBrick = missing(world, 'damageBrick', undefined);

@@ -16,7 +16,7 @@ export const FORGE_ITEMS = Object.freeze([
   { id: 'lives', name: 'Start lives', fact: 'Lives at the start of a run', ranks: ['4 lives', '5 lives', '5 lives, 1 free miss per run'], prices: [200, 500, 1000] },
   { id: 'heat', name: 'HEAT size', fact: 'Size of the HEAT meter', ranks: ['HEAT 120', 'HEAT 140', 'HEAT 160'], prices: [150, 400, 800] },
   { id: 'paddle', name: 'Paddle width', fact: 'Paddle width at the start', ranks: ['Paddle 130', 'Paddle 140', 'Paddle 150'], prices: [150, 400, 800] },
-  { id: 'embers', name: 'Ember value', fact: 'Embers banked per ember caught', ranks: ['Embers ×1.25', 'Embers ×1.5', 'Embers ×2'], prices: [250, 600, 1200] },
+  { id: 'embers', name: 'Ember value', fact: 'Embers banked per ember earned', ranks: ['Embers ×1.25', 'Embers ×1.5', 'Embers ×2'], prices: [250, 600, 1200] },
   { id: 'overload', name: 'Overload power', fact: 'Shorter HEAT vent, stronger Overloads', ranks: ['HEAT vents 10 s, Purge 4 rows, Quench 4 s', 'HEAT vents 8 s, Quench 5 s, Fork ×3', 'HEAT vents 6 s, Purge 5 rows, Quench 6 s'], prices: [200, 500, 1000] },
   { id: 'ball', name: 'Ball type', fact: 'Ball types to start a run with', ranks: ['Heavy: slower, 2 damage', 'Splitter: splits on a perfect hit', 'Sniper: aim line always on'], prices: [300, 700, 1400] },
 ].map((it) => Object.freeze({ ...it, max: it.ranks.length, ranks: Object.freeze(it.ranks), prices: Object.freeze(it.prices) })));
@@ -111,7 +111,7 @@ export function recordClear(save, n, levelScore, run) {
   save.stats.levelsCleared = (save.stats.levelsCleared | 0) + 1;
 }
 
-/** Embers banked for one raw ember caught, at this run's rank. */
+/** Embers banked for one raw ember earned, at this run's rank. */
 export function emberValue(run) {
   return FORGE_FX.EMBER_VALUE[runRanks(run).embers];
 }

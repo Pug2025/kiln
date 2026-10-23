@@ -267,6 +267,15 @@ kbd {
 .credits p { padding: 10px 12px; font: 400 16px/1.45 var(--font-body); color: var(--w70); -webkit-user-select: text; user-select: text; }
 .credits p + p { border-top: 1px solid var(--sep); }
 .credits a { color: var(--text); text-decoration: none; border-bottom: 1px solid var(--hair-tl); }
+.guide-copy { padding: 4px 12px 8px; }
+.guide-copy section { padding: 12px 0; }
+.guide-copy section + section { border-top: 1px solid var(--sep); }
+.guide-copy h2 { margin: 0 0 6px; font: 600 18px/1.25 var(--font-display); color: var(--text); }
+.guide-copy p { margin: 0; font: 400 16px/1.5 var(--font-body); color: var(--w70); }
+.resource-summary { padding: 10px 12px 4px; color: var(--w70); font: 400 16px/1.45 var(--font-body); }
+.resource-summary p { margin: 0 0 6px; }
+.resource-summary .wallet { color: var(--text); font-weight: 500; }
+.screen-results .panel { max-height: calc(100dvh - 48px); overflow-y: auto; }
 
 /* phones */
 @media (max-width: 760px) {

@@ -3,9 +3,10 @@
 // world state and touches the DOM only when a shown value changes (no layout reads, no allocation
 // beyond the text of a changed number).
 
-import { DROP, DROP_COUNT, DROP_FAMILY, LIVES } from '../core/constants.js';
+import { BRICK, DROP, DROP_COUNT, DROP_FAMILY, HAZARD, LIVES } from '../core/constants.js';
 import { formatScore, formatClock } from './layout.js';
 import { ICONS } from './icons.js';
+import { resourceFact } from './resources.js';
 
 const FX_LABEL = ['Wide', 'Slow', 'Multi', 'Fire', 'Laser', 'Catch', 'Thru', 'Life', 'Shrink', 'Fast', 'Fog', 'Mega'];
 const DISC_PX = 32; // the drawn pause / sound disc inside its 44 px target (layout.js HUD.BTN_DRAWN)
@@ -33,14 +34,15 @@ export function createHud(root, opts = {}) {
     </div></div>
     <div class="hb hud-heat"><div class="hi">
       <div class="heat-row" data-k="heatRow"><span class="k">Heat</span><span class="track"><span class="vent" data-k="vent"></span><span class="fill" data-k="heat"></span></span><span class="ready">Ready</span></div>
-      <div class="fx-row" data-k="fxRow">${FX_LABEL.map((n, i) => `<span class="fx ${DROP_FAMILY[i]}" hidden>${n}<b></b><i><u></u></i></span>`).join('')}<span class="fx cold" data-k="shield" hidden>Shield<b></b><i><u></u></i></span></div>
+      <div class="boss-fact" data-k="bossFact" hidden></div>
+      <div class="fx-row" data-k="fxRow">${FX_LABEL.map((n, i) => `<span class="fx ${DROP_FAMILY[i]}" hidden>${i === DROP.LASER ? '<span data-k="laserLabel">Laser</span>' : n}<b></b><i><u></u></i></span>`).join('')}<span class="fx cold" data-k="shield" hidden>Shield<b></b><i><u></u></i></span></div>
       <div class="drop-fact" data-k="dropFact" role="status" aria-live="polite" aria-atomic="true" hidden><span data-k="dropName"></span><span data-k="dropEffect"></span></div>
     </div></div>
     <div class="hb hud-right"><div class="hi">
-      <div class="kicker r">Level</div>
+      <div class="kicker r" data-k="levelLabel">Level</div>
       <div class="num level" data-k="level">01</div>
       <div class="name" data-k="name"></div>
-      <div class="boss" data-k="boss" hidden><span class="track"><span class="fill" data-k="bossFill"></span></span></div>
+      <div class="boss" data-k="boss" role="meter" aria-valuemin="0" hidden><span class="track"><span class="fill" data-k="bossFill"></span></span></div>
       <div class="lives" data-k="livesBox">
         <div class="kicker r">Lives</div>
         <div class="marks" data-k="marks">${'<i></i>'.repeat(LIVES.MAX)}</div>
@@ -68,6 +70,7 @@ export function createHud(root, opts = {}) {
   const scoreKicker = blocks.score.querySelector('.kicker');
   const sfx = blocks.score.querySelector('.sfx');
   const btns = el.querySelector('.hud-btns');
+  const coarse = typeof window !== 'undefined' && window.matchMedia ? window.matchMedia('(pointer: coarse)') : { matches: false };
   // a tap on a HUD button must never reach the stage (steering, actions)
   for (const b of [k.pauseBtn, k.muteBtn]) b.addEventListener('pointerdown', (e) => e.stopPropagation());
   k.pauseBtn.addEventListener('click', () => { if (opts.onPause) opts.onPause(); });
@@ -79,10 +82,11 @@ export function createHud(root, opts = {}) {
     ready: null, clock: -1, timed: null, boss: -1, bossOn: null, shield: -1, vent: -1, ventPeak: 0,
     fxOn: new Int8Array(DROP_COUNT).fill(-1), fxQ: new Int16Array(DROP_COUNT).fill(-1),
     fxN: new Int16Array(DROP_COUNT).fill(-1), deltaUntil: 0, deltaOn: false, noteUntil: 0,
-    dropUntil: 0, dropSeen: 0,
+    dropUntil: 0, dropSeen: 0, bossLabel: '', bossFact: '', bossAria: '', laserLabel: '', contextOn: null,
   };
   const peak = new Float32Array(DROP_COUNT); // longest ms seen per effect, for its line
   let scale = 1;
+  let narrow = false;
 
   function reset() {
     last.score = -1; last.mult = -1; last.level = -1; last.name = null; last.lives = -1; last.last = null;
@@ -98,6 +102,8 @@ export function createHud(root, opts = {}) {
     last.dropUntil = 0; last.dropSeen = 0;
     k.dropFact.hidden = true;
     blocks.heat.classList.remove('drop-fact-on');
+    last.bossLabel = ''; last.bossFact = ''; last.bossAria = ''; last.laserLabel = '';
+    last.contextOn = null;
   }
 
   return {
@@ -114,6 +120,7 @@ export function createHud(root, opts = {}) {
       if (k.delta.parentNode !== deltaHome) deltaHome.appendChild(k.delta);
       const s = L.s;
       scale = s;
+      narrow = L.heat.w * s < 180;
       // text sizes in field units with their on-screen floors (layout.js hudText)
       el.style.setProperty('--k', `${L.text.k.toFixed(2)}px`);
       el.style.setProperty('--small', `${L.text.small.toFixed(2)}px`);
@@ -155,6 +162,12 @@ export function createHud(root, opts = {}) {
       if (!last.deltaOn) { k.delta.classList.add('show'); last.deltaOn = true; }
       last.deltaUntil = now + NOTE_MS;
       last.noteUntil = last.deltaUntil;
+    },
+
+    /** The content layer supplies the actual loss after clamping to the available HEAT. */
+    hazardHit(kind, lost, now) {
+      const name = kind === HAZARD.SLAG ? 'Slag' : kind === HAZARD.BOLT ? 'Bolt' : 'Bomb';
+      this.note(lost > 0 ? `${name} −${Math.round(lost)} HEAT` : `${name} · HEAT empty`, now);
     },
 
     /** First opening powers: a named cell and its effect, in the space already reserved for HEAT. */
@@ -240,8 +253,13 @@ export function createHud(root, opts = {}) {
         last.level = lvl.n;
         k.level.textContent = String(lvl.n).padStart(2, '0');
       }
-      const name = lvl.def.name || '';
+      const boss = world.boss;
+      const bossOn = !!boss.active && boss.hpMax > 0;
+      const coreStage = boss.id === 'core' ? Math.max(1, Math.min(3, lvl.stage || lvl.def.stage || boss.phase || 1)) : 0;
+      const name = bossOn ? `${boss.hp} core ${boss.hp === 1 ? 'hit' : 'hits'} left` : lvl.def.name || '';
       if (name !== last.name) { last.name = name; k.name.textContent = name; }
+      const bossLabel = bossOn ? boss.id === 'stoker' ? 'Stoker' : boss.id === 'crucible' ? 'Crucible' : `Core ${coreStage}/3` : 'Level';
+      if (bossLabel !== last.bossLabel) { last.bossLabel = bossLabel; k.levelLabel.textContent = bossLabel; }
 
       const lives = run.lives;
       const lastLife = !!world.fx.lastLife;
@@ -278,20 +296,47 @@ export function createHud(root, opts = {}) {
         if (v !== last.vent) { last.vent = v; k.vent.style.transform = `scaleX(${v / 50})`; }
       }
 
-      const boss = world.boss;
-      const bossOn = !!boss.active && boss.hpMax > 0;
-      if (bossOn !== last.bossOn) { last.bossOn = bossOn; k.boss.hidden = !bossOn; }
+      if (bossOn !== last.bossOn) {
+        last.bossOn = bossOn;
+        k.boss.hidden = !bossOn;
+        blocks.heat.classList.toggle('boss-on', bossOn);
+        fxEls[DROP.LASER].classList.toggle('laser-action', bossOn);
+      }
       if (bossOn) {
         const q = Math.round((boss.hp / boss.hpMax) * 100);
-        if (q !== last.boss) { last.boss = q; k.bossFill.style.transform = `scaleX(${Math.max(0, q) / 100})`; }
+        const aria = `${lvl.def.name || bossLabel}${coreStage ? `, stage ${coreStage} of 3` : ''}, ${name}`;
+        if (q !== last.boss || aria !== last.bossAria) {
+          last.boss = q;
+          last.bossAria = aria;
+          k.bossFill.style.transform = `scaleX(${Math.max(0, q) / 100})`;
+          k.boss.setAttribute('aria-label', `${lvl.def.name || bossLabel}${coreStage ? `, stage ${coreStage} of 3` : ''}, core hits remaining`);
+          k.boss.setAttribute('aria-valuemax', boss.hpMax);
+          k.boss.setAttribute('aria-valuenow', boss.hp);
+          k.boss.setAttribute('aria-valuetext', name);
+        }
       }
+      const won = lvl.total > 0 && lvl.remaining <= 0;
+      const fact = bossOn && !won ? bossFact(world) : resourceFact(world);
+      if (fact !== last.bossFact) { last.bossFact = fact; k.bossFact.textContent = fact; }
+      const contextOn = !last.dropUntil;
+      if (contextOn !== last.contextOn) {
+        last.contextOn = contextOn; k.bossFact.hidden = !contextOn;
+        blocks.heat.classList.toggle('context-on', contextOn);
+      }
+      let held = false;
+      if (bossOn && world.balls) {
+        for (const ball of world.balls) if (ball.alive && ball.held) { held = true; break; }
+      }
+      const laserLabel = bossOn && held ? 'Laser · launch first'
+        : bossOn && world.phase === 'play' ? coarse.matches ? narrow ? 'Tap: Laser' : 'Quick tap: Laser' : 'Space / click: Laser' : 'Laser';
+      if (laserLabel !== last.laserLabel) { last.laserLabel = laserLabel; k.laserLabel.textContent = laserLabel; }
 
       // active drops: a label and a 1-unit line for the time left
       const ms = econ.effectMs;
       const fx = world.effects;
       for (let i = 0; i < DROP_COUNT; i++) {
         const v = ms[i];
-        const on = v > 0 ? 1 : 0;
+        const on = v > 0 && (i !== DROP.LASER || fx.laserShots > 0) ? 1 : 0;
         if (on !== last.fxOn[i]) {
           last.fxOn[i] = on;
           fxEls[i].hidden = !on;
@@ -312,4 +357,28 @@ export function createHud(root, opts = {}) {
       }
     },
   };
+}
+
+/** Persistent facts follow live collision state, not the short serving card or elapsed time. */
+function bossFact(world) {
+  const boss = world.boss;
+  if (boss.hp <= 0) return boss.id === 'core' && boss.phase < 3 ? 'Stage complete' : 'Core broken';
+  if (boss.data?.guard) return 'Core cooling briefly';
+  if (boss.id !== 'stoker') return boss.id === 'core' && boss.phase === 3
+    ? 'Aligned gaps → core' : 'Gap → core';
+  if (boss.data?.jawRepairPending) return 'One jaw repair · damage stays';
+  const B = world.bricks;
+  if (B) {
+    // An outer jaw opening is not a route to the core. Only a missing plate directly below the
+    // fused weak point counts; this remains true as the whole head sways side to side.
+    let core = -1;
+    for (let i = 0; i < B.count; i++) if (B.alive[i] && B.type[i] === BRICK.WEAK) { core = i; break; }
+    if (core >= 0) {
+      for (let i = 0; i < B.count; i++) {
+        if (B.alive[i] || B.type[i] !== BRICK.ARMOURED || B.y[i] <= B.y[core]) continue;
+        if (Math.abs(B.x[i] - B.x[core]) < (B.w[i] + B.w[core]) / 2) return 'Jaw open → core';
+      }
+    }
+  }
+  return 'Break jaw → core';
 }

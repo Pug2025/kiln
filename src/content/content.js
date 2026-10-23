@@ -824,12 +824,18 @@ export function createContent() {
           case EV.SENTRY_HIT:
             sentries.onHit(w, rd.id, rd.b | 0, rd.a | 0, ctx);
             break;
-          case EV.HAZARD_HIT:
+          case EV.HAZARD_HIT: {
             // a bomb, slag or bolt knocks HEAT out of the meter; it never shrinks the paddle (PLAN §1
             // frustration fix 3: shrink only via a red drop the player chose to catch)
-            if (w.phase === 'play' || w.phase === 'serve') w.api.addHeat(-CONTENT.HAZARD_HEAT);
+            if (w.phase === 'play' || w.phase === 'serve') {
+              const before = Number.isFinite(w.econ?.heat) ? w.econ.heat : 0;
+              w.api.addHeat(-CONTENT.HAZARD_HEAT);
+              const after = Number.isFinite(w.econ?.heat) ? w.econ.heat : before;
+              emit(w.bus, EV.HAZARD_HEAT_LOST, rd.id, rd.x, rd.y, rd.a | 0, Math.max(0, before - after));
+            }
             if (boss && boss.onHazardHit) boss.onHazardHit(w, rd.id, rd.a | 0);
             break;
+          }
           default:
             break;
         }

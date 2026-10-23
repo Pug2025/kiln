@@ -1,7 +1,7 @@
 // B: the three bosses (src/content/bosses.js, bosses/*.js).
 
 import { test, assert } from './lib.mjs';
-import { BF, SRC, HAZARD, PADDLE, RING, HORIZONTAL } from '../src/core/constants.js';
+import { BF, SRC, HAZARD, PADDLE, RING, HORIZONTAL, PHYS } from '../src/core/constants.js';
 import { getLevel, getStage, stagesOf } from '../src/levels/index.js';
 import { BOSS_PARTS } from '../src/content/bosses.js';
 import { STOKER, STOKER_PARTS } from '../src/content/bosses/stoker.js';
@@ -32,7 +32,7 @@ function hitCoreTimes(t, core, n) {
   }
 }
 
-test('The Stoker: armoured jaw, a core with a cooldown, phase 2 regrows the jaw and sways', () => {
+test('The Stoker: two-hit jaw, one phase-change repair, retained core damage and permanent later openings', () => {
   const t = contentWorld(getLevel(10));
   const w = t.world;
   const jaw = groupOf(w, STOKER_PARTS.JAW);
@@ -44,58 +44,90 @@ test('The Stoker: armoured jaw, a core with a cooldown, phase 2 regrows the jaw 
   assert.ok(head.length > 20);
   assert.equal(w.boss.id, 'stoker');
   assert.equal(w.level.remaining, STOKER.HP);
+  assert.ok(jaw.every((i) => w.bricks.hp[i] === 2 && w.bricks.hpMax[i] === 2), 'first-boss armour has two hits');
   t.hit(jaw[0]);
+  assert.equal(w.bricks.alive[jaw[0]], 1);
+  assert.equal(w.bricks.hp[jaw[0]], 1, 'the first hit visibly damages armour');
   t.hit(jaw[0]);
-  assert.equal(w.bricks.alive[jaw[0]], 1, 'a jaw plate is armour');
-  t.hit(jaw[0]);
-  assert.equal(w.bricks.alive[jaw[0]], 0);
+  assert.equal(w.bricks.alive[jaw[0]], 0, 'the second opens it');
+  t.hit(jaw[1]);
   t.step(1);
-  assert.ok(Math.abs(w.boss.open - 1 / 6) < 1e-6, 'boss.open follows the broken plates');
+  assert.ok(Math.abs(w.boss.open - 1 / 6) < 1e-6, 'boss.open follows actual broken plates');
   t.hit(head[0], SRC.LASER, -1);
   assert.equal(w.bricks.alive[head[0]], 1, 'the head only deflects');
   t.hit(core[0]);
   t.hit(core[0]);
-  assert.equal(w.boss.hp, STOKER.HP - 1, 'one hit per cooldown');
-  t.step(COOL);
-  hitCoreTimes(t, core[0], STOKER.HP - 1 - STOKER.PHASE2_AT);
+  assert.equal(w.boss.hp, STOKER.HP - 1, 'one core hit per cooldown');
   assert.equal(w.boss.phase, 2);
-  assert.equal(w.level.remaining, STOKER.PHASE2_AT);
-  assert.ok(jaw.every((i) => w.bricks.alive[i]), 'the jaw slammed shut');
+  assert.equal(w.level.remaining, 4, 'phase changes never restore core health');
+  assert.ok(w.boss.data.jawRepairDone);
+  assert.equal(w.boss.data.jawRepairPending, false);
+  assert.equal(w.bricks.hp[jaw[0]], 2, 'a broken plate reforms at two hits');
+  assert.equal(w.bricks.hp[jaw[1]], 1, 'a surviving damaged plate retains its damage');
+  assert.equal(t.events().filter((e) => e.name === 'BRICK_SPAWNED' && jaw.includes(e.id)).length, 1);
   assert.ok(t.events().some((e) => e.name === 'BOSS_PHASE' && e.a === 2));
   const x0 = w.bricks.x[head[0]];
   t.step(90);
-  assert.notEqual(w.bricks.x[head[0]], x0, 'the head sways');
+  assert.notEqual(w.bricks.x[head[0]], x0, 'the head still sways');
   assert.ok(w.bricks.flags[head[0]] & BF.MOVING);
-  for (let k = 0; k < 3; k++) t.hit(jaw[1]);
+  t.hit(jaw[1]);
   assert.equal(w.bricks.alive[jaw[1]], 0);
-  hitCoreTimes(t, core[0], 1);
-  assert.equal(w.bricks.alive[jaw[1]], 1, 'phase 2: the jaw shuts again behind a ball that scores');
-  for (let k = 0; k < 3; k++) t.hit(jaw[4]);
   t.step(Math.ceil(20000 / 8.33));
-  assert.equal(w.bricks.alive[jaw[4]], 0, 'an open jaw stays open until a ball uses it (no timer)');
+  assert.equal(w.bricks.alive[jaw[1]], 0, 'an unused opening has no closing timer');
   hitCoreTimes(t, core[0], 1);
-  assert.equal(w.bricks.alive[jaw[4]], 1, 'and shuts behind the ball that scored');
-  hitCoreTimes(t, core[0], STOKER.PHASE2_AT - 2);
+  assert.equal(w.bricks.alive[jaw[1]], 0, 'scoring later never schedules another repair');
+  assert.equal(w.boss.data.jawRepairPending, false);
+  hitCoreTimes(t, core[0], w.boss.hp);
   assert.equal(w.level.remaining, 0);
+  assert.equal(t.events().filter((e) => e.name === 'BRICK_SPAWNED' && jaw.includes(e.id)).length, 1, 'one repair only over the whole fight');
   assert.ok(t.events().some((e) => e.name === 'BOSS_DEFEATED'));
   t.step(80);
   for (let i = 0; i < w.bricks.count; i++) assert.ok(!(w.bricks.alive[i] && (w.bricks.flags[i] & BF.BOSS)), 'every boss brick broke');
   assert.equal(w.boss.active, false);
 });
 
-test('The Stoker never shuts its jaw on a ball', () => {
+test('The Stoker repair waits for every ball, never closes on one, and preserves health while waiting', () => {
   const t = contentWorld(getLevel(10));
   const w = t.world;
   const jaw = groupOf(w, STOKER_PARTS.JAW);
   const core = groupOf(w, STOKER_PARTS.CORE);
-  for (let k = 0; k < 3; k++) t.hit(jaw[2]);
-  w.api.spawnBall(w.bricks.x[core[0]], w.bricks.y[core[0]] + 30, 0, 0); // a ball inside the mouth
-  hitCoreTimes(t, core[0], STOKER.HP - STOKER.PHASE2_AT);
+  for (let k = 0; k < STOKER.JAW_HP; k++) t.hit(jaw[2]);
+  const b0 = w.api.spawnBall(w.bricks.x[core[0]], w.bricks.y[core[0]] + 30, 0, 0);
+  const b1 = w.api.spawnBall(w.bricks.x[core[0]] + 20, w.bricks.y[core[0]] + 35, 0, 0);
+  hitCoreTimes(t, core[0], 1);
   assert.equal(w.boss.phase, 2);
-  assert.equal(w.bricks.alive[jaw[2]], 0, 'held open while the ball is inside');
-  w.balls[0].alive = false;
+  assert.ok(w.boss.data.jawRepairPending);
+  assert.equal(w.boss.data.jawRepairDone, false);
+  assert.equal(w.bricks.alive[jaw[2]], 0, 'held open while a ball is inside');
+  w.balls[b0].alive = false;
+  t.step(COOL);
+  t.hit(core[0]);
+  t.step(Math.ceil(CONTENT.GUARD_MS / 8.33) + 2);
+  assert.equal(w.bricks.alive[jaw[2]], 0, 'a second ball keeps it open even beyond the guard timer');
+  assert.equal(w.boss.hp, 3, 'another core hit while waiting is permanent progress');
+  w.balls[b1].alive = false;
   t.step(2);
-  assert.equal(w.bricks.alive[jaw[2]], 1, 'shut once it left');
+  assert.equal(w.bricks.alive[jaw[2]], 1, 'repaired once every ball left');
+  assert.equal(w.boss.hp, 3, 'repair does not heal the core');
+  assert.ok(w.boss.data.jawRepairDone);
+  assert.equal(w.boss.data.jawRepairPending, false);
+});
+
+test('The Stoker jaw still breaks in one laser or fire hit, while ordinary armour stays three hits', () => {
+  for (const src of [SRC.LASER, SRC.FIRE]) {
+    const t = contentWorld(getLevel(10));
+    const jaw = groupOf(t.world, STOKER_PARTS.JAW);
+    t.hit(jaw[0], src, -1);
+    assert.equal(t.world.bricks.alive[jaw[0]], 0);
+  }
+  const t = contentWorld(getLevel(11));
+  const B = t.world.bricks;
+  const i = [...B.alive].findIndex((alive, k) => alive && B.hp[k] === 3 && (B.flags[k] & BF.ARMOURED));
+  assert.ok(i >= 0, 'level 11 still teaches normal armour');
+  t.hit(i); t.hit(i);
+  assert.equal(B.alive[i], 1);
+  t.hit(i);
+  assert.equal(B.alive[i], 0);
 });
 
 test('The Stoker spits slag toward the paddle', () => {
@@ -146,6 +178,46 @@ test('The Crucible: the ring stays sealed as it turns, one gate; phase 2 reverse
   t.step(10);
   assert.ok(w.boss.angle < a1, 'phase 2 turns the other way');
   assert.ok(Math.abs(w.boss.angle - a1) > Math.abs(a0 - (a0 - 10 * spec.omega * 8.33 / 1000)), 'and faster');
+});
+
+/** Each contiguous run of empty slots is one opening (including a run across slot zero). */
+function gapCentres(spec) {
+  const gaps = new Set(spec.gaps), centres = [];
+  for (const k of spec.gaps) {
+    if (gaps.has((k - 1 + spec.slots) % spec.slots)) continue;
+    let count = 1;
+    while (gaps.has((k + count) % spec.slots)) count++;
+    centres.push((k + (count - 1) / 2) * 2 * Math.PI / spec.slots);
+  }
+  return centres;
+}
+
+test('Crucible and every Core stage: each rotating gap passes a whole ball, including Mega, at every sampled angle', () => {
+  for (const spec of [CRUCIBLE_SPEC, ...CORE_SPECS.slice(1)]) {
+    const def = spec.id === 'crucible' ? getLevel(20) : getStage(`core-${spec.phase}`);
+    const t = contentWorld(def), w = t.world, B = w.bricks;
+    for (let sample = 0; sample < 120; sample++) {
+      for (let r = 0; r < spec.rings.length; r++) {
+        const ring = spec.rings[r], ids = groupOf(w, ring.group);
+        const angle = r === 0 ? w.boss.angle : (w.boss.data.angle2 || 0);
+        for (const gap of gapCentres(ring)) {
+          const a = gap + angle;
+          // Sweep the ball centre across this ring's entire thickness, using circle/rectangle
+          // separation rather than just the distance between plate centres.
+          for (let d = ring.r - 40; d <= ring.r + 40; d += 2) {
+            const x = w.boss.x + Math.cos(a) * d, y = w.boss.y + Math.sin(a) * d;
+            for (const i of ids) {
+              const dx = Math.max(0, Math.abs(x - B.x[i]) - B.w[i] / 2);
+              const dy = Math.max(0, Math.abs(y - B.y[i]) - B.h[i] / 2);
+              assert.ok(dx * dx + dy * dy >= PHYS.MEGA_R * PHYS.MEGA_R,
+                `${def.id} ring ${r} sample ${sample}: a whole Mega ball fits through its visible gap`);
+            }
+          }
+        }
+      }
+      t.step(17);
+    }
+  }
 });
 
 test('The Core: stages clear with STAGE_CLEARED, the last with BOSS_DEFEATED', () => {

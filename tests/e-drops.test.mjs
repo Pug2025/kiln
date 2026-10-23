@@ -212,5 +212,6 @@ test('no drops once the level is won (a boss defeat shower, chain breaks after t
   r.emit(EV.BRICK_BROKEN, 3, 100, 200, BRICK.PLAIN, SRC.EXPLOSION, -1);
   r.step(3);
   assert.deepEqual(r.calls.drops, [DROP.WIDE], 'nothing after the win');
-  assert.equal(r.calls.embers.length, 3, 'embers still burst: the win pays');
+  assert.equal(r.calls.embers.length, 1, 'post-win embers are banked instead of released as unreachable pickups');
+  assert.ok(r.world.econ.embersAutoBanked >= 4 && r.world.econ.embersAutoBanked <= 8, 'the winning batch still pays its seeded ember currency');
 });

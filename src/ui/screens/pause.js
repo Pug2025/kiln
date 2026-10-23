@@ -11,6 +11,7 @@ export function pause(data, { el, nav }) {
     data.onRestart ? { label: 'Restart level', act: () => data.onRestart() } : null,
     data.onMute ? { toggle: true, label: 'Sound', on: !data.muted, change: () => data.onMute() } : null,
     data.onSettings ? { label: 'Settings', act: () => data.onSettings() } : null,
+    data.onGuide ? { label: 'How it works', act: () => data.onGuide() } : null,
     data.onQuit ? { label: 'Levels', detail: 'Ends the run', act: () => data.onQuit() } : null,
   ]);
   el.appendChild(h('div.stack.narrow', panel('Paused', sub, list)));

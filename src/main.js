@@ -18,6 +18,7 @@
 // window.__kiln exposes world, renderer, stats and the flow for G's harness.
 
 import { SIM } from './core/constants.js';
+import { forgeProgress, bankStageRewards } from './ui/resources.js';
 import { createWorld, stepWorld } from './core/world.js';
 import { createInputFrame, clearEdges } from './core/input-frame.js';
 import { dailySeed } from './core/rng.js';
@@ -286,6 +287,7 @@ async function boot() {
     while (nextEvent(uiEvents)) {
       if (uiEvents.type === EV.FREE_MISS && !app.attract) ui.hudNote('Free miss');
       else if (uiEvents.type === EV.BALL_LOST && !app.attract) liteToast();
+      else if (uiEvents.type === EV.HAZARD_HEAT_LOST && !app.attract) ui.hudHazardHit(uiEvents.a, uiEvents.b);
       else if (!app.attract && app.world.level.n <= 2) {
         if (uiEvents.type === EV.DROP_SPAWNED) ui.hudOpeningDrop(uiEvents.a);
         else if (uiEvents.type === EV.EFFECT_ON) ui.hudOpeningDrop(uiEvents.a, true, uiEvents.c | 0);
@@ -324,6 +326,7 @@ async function boot() {
 
   /** Start a world for the player with the current run. */
   function playWorld(def) {
+    if (!(def.stage > 1)) app.rewardChain = null;
     app.run.levelN = def.n;
     app.stageRun = clone(app.run);
     setWorld(createWorld({ level: def, seed: app.run.seed + def.n * 31 + (def.stage | 0) + app.wave * 977, run: app.run, systems: makeSystems() }), false);
@@ -408,6 +411,7 @@ async function boot() {
       overburnOpen(c) ? { id: 'overburn', label: 'OVERBURN' } : null,
       { id: 'forge', label: 'THE FORGE' },
       { id: 'settings', label: 'SETTINGS' },
+      { id: 'guide', label: 'HOW IT WORKS' },
     ].filter(Boolean);
     const cleared = Object.keys(c.cleared).filter((k) => c.cleared[k] && Number(k) <= 30).length;
     const forged = Object.values(data.forge.ranks || {}).reduce((a, v) => a + (v | 0), 0);
@@ -427,6 +431,7 @@ async function boot() {
       muted: !!settings.muted,
       onMute: toggleMute,
       onSelect(id) {
+        if (id === 'guide') { showGuide(showTitle); return; }
         if (id === 'play' || id === 'overburn') phoneFullscreen(); // inside the tap, before any wait
         whenReady(() => {
           if (id === 'play') startRun(n);
@@ -462,6 +467,11 @@ async function boot() {
       ball: { kinds: ext.ballKinds(data), current: ballKind(), onChange: setBallKind },
       onBack: back,
     });
+  }
+
+  function showGuide(back = showTitle) {
+    if (app.mode !== 'play') toMenu();
+    ui.show('guide', { onBack: back });
   }
 
   function showSettings(back) {
@@ -562,23 +572,33 @@ async function boot() {
     const w = app.world;
     const def = w.level.def;
     const step = afterWorld(def, w.phase, { hasStage: (id) => !!getStage(id), wave: app.wave });
-    if (step.type === 'stage') { playWorld(getStage(step.id)); return; }
+    if (step.type === 'stage') {
+      app.rewardChain = bankStageRewards(w, data, (d, r) => ext.bankRun(d, r), app.rewardChain);
+      save.write(data);
+      playWorld(getStage(step.id)); return;
+    }
     app.mode = 'ended';
     input.setEnabled(false);
     const levelScore = w.econ.levelScore | 0;
-    const embers = w.econ.embersCaught | 0;
+    const caught = (app.rewardChain?.caught || 0) + (w.econ.embersCaught | 0);
+    const auto = (app.rewardChain?.auto || 0) + (w.econ.embersAutoBanked | 0);
+    const embers = caught + auto;
+    const walletBefore = data.forge.embers | 0;
+    const rewards = () => ({ caught, auto, forgeGain: (app.rewardChain?.forgeGain || 0) +
+      Math.max(0, (data.forge.embers | 0) - walletBefore), ...forgeProgress(ext.forgeModel(data)) });
+    const rewardScope = app.rewardChain ? 'This encounter' : 'This level';
     if (step.type === 'over') {
       const reached = def.world === 'overburn' ? `Wave ${app.wave}` : `${String(def.n).padStart(2, '0')} ${def.name}`;
       const runScore = app.run.score | 0;
       const banked = app.run.embersBanked | 0;
       endRun('over');
-      results({ kind: 'over', n: def.n, runScore, embers: banked, reached, nextLabel: 'Levels', onNext: () => showMap(def.n <= 30 ? def.n : undefined) });
+      results({ kind: 'over', n: def.n, runScore, embers: banked, rewards: rewards(), rewardScope, reached, nextLabel: 'Levels', onNext: () => showMap(def.n <= 30 ? def.n : undefined) });
       return;
     }
     // cleared: bank and save after every level
     app.lastBest = bankClear(def, levelScore);
     if (step.type === 'wave') {
-      results({ kind: 'wave', wave: app.wave, score: levelScore, runScore: app.run.score, embers, nextLabel: 'Next wave',
+      results({ kind: 'wave', wave: app.wave, score: levelScore, runScore: app.run.score, embers, rewards: rewards(), rewardScope, nextLabel: 'Next wave',
         onNext: () => {
           app.wave = step.wave;
           app.run.overburnWave = step.wave; // D call: E's run field has no setter; E reads it for bests
@@ -591,12 +611,13 @@ async function boot() {
       const runScore = app.run.score | 0;
       const banked = app.run.embersBanked | 0;
       endRun('campaign');
-      results({ kind: 'campaign', name: 'Overburn is open.', runScore, embers: banked, nextLabel: 'Title', onNext: showTitle });
+      results({ kind: 'campaign', name: 'Overburn is open.', runScore, embers: banked, rewards: rewards(), rewardScope, nextLabel: 'Title', onNext: showTitle });
       return;
     }
     const next = levelDef(step.n);
     results({
       kind: 'cleared', n: def.n, name: def.name, score: levelScore, runScore: app.run.score, embers,
+      rewards: rewards(), rewardScope,
       bonus: (w.econ.clearBonus | 0) + (w.econ.cavityBonus | 0), flawless: !!w.econ.flawless,
       best: app.lastBest.best, newBest: app.lastBest.newBest,
       nextLabel: `Next  ·  ${String(next.n).padStart(2, '0')}`,
@@ -635,6 +656,7 @@ async function boot() {
     }
     results({
       kind: 'cleared', n: 3, name: levelDef(3).name, score: 12400, runScore: 31850, embers: 18, bonus: 2500,
+      rewards: { caught: 11, auto: 7, forgeGain: 18, ...forgeProgress(ext.forgeModel(data)) },
       flawless: true, best: 12400, newBest: true, nextLabel: 'Next  ·  04', onNext: showTitle, onMap: showTitle,
     });
   }
@@ -677,6 +699,7 @@ async function boot() {
         playWorld(def);
       } : null,
       onSettings: () => showSettings(() => showPause(reason)),
+      onGuide: () => showGuide(() => showPause(reason)),
       onQuit: () => { endRun('quit'); showMap(def.n <= 30 ? def.n : 31); },
     });
   }
@@ -771,6 +794,7 @@ async function boot() {
     world: null, renderer, input, ui, audio, save, data, app, ext, qa: QA,
     pause, resume, startRun, startLevel: startRun, startOverburn, showTitle, showMap,
     showForge: () => showForge(showTitle), showSettings: () => showSettings(showTitle),
+    showGuide: () => showGuide(app.paused ? () => showPause('user') : showTitle),
     showCredits: () => { toMenu(); showCredits(showTitle); }, toggleMute,
     hudCheck: () => ui.hudCheck(),
     showResults: qaResults, showPick: qaPick, showGate: (n = 14) => qaPick('gate', n),

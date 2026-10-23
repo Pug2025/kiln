@@ -149,11 +149,12 @@ export const SPARK_FRAG = withOutput(`
 
 // Burst particles (hit sparks, ball trail): CPU-written ring buffer of points.
 export const BURST_VERT = `
-  attribute float aLife; attribute float aSize; attribute float aGain; varying float vLife; varying float vGain; uniform float uScale;
-  void main(){ vLife = aLife; vGain = aGain; vec4 mv = modelViewMatrix * vec4(position, 1.0);
+  attribute float aLife; attribute float aSize; attribute float aGain; attribute float aCold; varying float vLife; varying float vGain; varying float vCold; uniform float uScale;
+  void main(){ vLife = aLife; vGain = aGain; vCold = aCold; vec4 mv = modelViewMatrix * vec4(position, 1.0);
     gl_PointSize = aSize * aLife * uScale / -mv.z; gl_Position = projectionMatrix * mv; }`;
 
 export const BURST_FRAG = withOutput(`
-  precision highp float; varying float vLife; varying float vGain; uniform vec3 uHeatLo, uHeatHi;
+  precision highp float; varying float vLife; varying float vGain; varying float vCold; uniform vec3 uHeatLo, uHeatHi;
   void main(){ if (vLife < 0.03) discard; float r = length(gl_PointCoord - 0.5); float d = smoothstep(0.5, 0.1, r);
-    vec3 c = mix(uHeatLo, uHeatHi, vLife * vLife); gl_FragColor = vec4(c * d * vGain * vLife, d * vLife); }`);
+    vec3 c = mix(mix(uHeatLo, uHeatHi, vLife * vLife), vec3(0.28, 0.31, 0.35), vCold);
+    gl_FragColor = vec4(c * d * vGain * vLife, d * vLife); }`);

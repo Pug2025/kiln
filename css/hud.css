@@ -68,7 +68,7 @@ html.rm .hud .hi, html.rm .hud .hud-btns .icon-btn { scale: none; }
 .hud-heat { width: 300px; }
 /* The first two powers get one short fact where the opening levels have no HEAT meter yet.
    Two lines fit the existing reserved block; normal effect labels return after the fact. */
-.hud-heat.drop-fact-on .heat-row, .hud-heat.drop-fact-on .fx-row { visibility: hidden; }
+.hud-heat.drop-fact-on .heat-row, .hud-heat.drop-fact-on .fx-row, .hud-heat.drop-fact-on .boss-fact { visibility: hidden; }
 .drop-fact { position: absolute; left: 0; top: 0; width: 100%; display: flex; flex-direction: column; gap: 5px; }
 .drop-fact[hidden] { display: none; }
 .drop-fact > :first-child { font: 500 var(--tiny)/1 var(--font-body); letter-spacing: .2em; text-transform: uppercase; color: var(--text); }
@@ -103,6 +103,14 @@ html.rm .hud .hi, html.rm .hud .hud-btns .icon-btn { scale: none; }
 .fx u { position: absolute; inset: 0; background: var(--w70); transform-origin: 0 50%; }
 .fx.cold u { background: var(--cold); }
 .fx.warn u { background: var(--warn); }
+/* Boss objectives persist beside the existing HEAT/effect facts. On phones this uses the spare
+   line above the field already needed by the right-hand lives block; no camera resize. */
+.boss-fact { margin-top: 12px; font: 500 var(--tiny)/1 var(--font-body); color: var(--text); white-space: nowrap; }
+.boss-fact[hidden] { display: none; }
+.hud-heat.context-on .fx-row { margin-top: 6px; gap: 6px 12px; }
+.hud-heat.boss-on .fx { letter-spacing: 0; text-transform: none; }
+.hud.gutter .hud-heat.context-on .boss-fact { margin-top: calc(20px + var(--tiny)); }
+.hud.gutter .hud-heat.context-on .fx-row { margin-top: 10px; }
 
 /* right: level number, name, boss line, lives (or time on timed bonus levels) */
 .hud-right { width: 220px; text-align: right; }

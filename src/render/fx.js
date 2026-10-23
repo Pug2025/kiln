@@ -76,15 +76,18 @@ export function createFx(scene, M) {
   const NB = 480;
   const bpos = new Float32Array(NB * 3), blife = new Float32Array(NB), bsize = new Float32Array(NB);
   const bvel = new Float32Array(NB * 2), bdecay = new Float32Array(NB), bgain = new Float32Array(NB);
+  const bcold = new Float32Array(NB);
   const bg = new THREE.BufferGeometry();
   const bposA = new THREE.BufferAttribute(bpos, 3).setUsage(THREE.DynamicDrawUsage);
   const blifeA = new THREE.BufferAttribute(blife, 1).setUsage(THREE.DynamicDrawUsage);
   const bsizeA = new THREE.BufferAttribute(bsize, 1).setUsage(THREE.DynamicDrawUsage);
   const bgainA = new THREE.BufferAttribute(bgain, 1).setUsage(THREE.DynamicDrawUsage);
+  const bcoldA = new THREE.BufferAttribute(bcold, 1).setUsage(THREE.DynamicDrawUsage);
   bg.setAttribute('position', bposA);
   bg.setAttribute('aLife', blifeA);
   bg.setAttribute('aSize', bsizeA);
   bg.setAttribute('aGain', bgainA);
+  bg.setAttribute('aCold', bcoldA);
   // per point gain (review 2026-10-22, ART 14: bloom only on the ball, molten cores, fire and the
   // rupture): hit sparks LOOK.BURST_GAIN keep heat-high under 0.85 linear, the ball's own trail
   // dots LOOK.TRAIL_GAIN may cross the bloom threshold
@@ -166,7 +169,7 @@ export function createFx(scene, M) {
     },
 
     /** n burst points at a world position; gain LOOK.BURST_GAIN keeps them under the bloom threshold. */
-    burst(x, y, z, n, spread, speed, size, life = 1, gain = LOOK.BURST_GAIN) {
+    burst(x, y, z, n, spread, speed, size, life = 1, gain = LOOK.BURST_GAIN, cold = 0) {
       for (let i = 0; i < n; i++) {
         const k = bhead;
         bhead = (bhead + 1) % NB;
@@ -175,6 +178,7 @@ export function createFx(scene, M) {
         bpos[k * 3 + 2] = z;
         blife[k] = 1;
         bgain[k] = gain;
+        bcold[k] = cold;
         bdecay[k] = 2.4 / life;
         bsize[k] = size * (0.6 + Math.random() * 0.8);
         const a = Math.random() * Math.PI * 2, s = speed * (0.3 + Math.random());
@@ -182,6 +186,11 @@ export function createFx(scene, M) {
         bvel[k * 2 + 1] = Math.sin(a) * s * spread;
       }
       bliveAny = true;
+    },
+
+    /** A short carbon-grey contact, deliberately separate from a successful molten core hit. */
+    blocked(x, y) {
+      this.burst(x, y, 8, 4, 0.7, 55, 5, 0.28, 0.55, 1);
     },
 
     setScale(s) {
@@ -215,6 +224,7 @@ export function createFx(scene, M) {
         blifeA.needsUpdate = true;
         bsizeA.needsUpdate = true;
         bgainA.needsUpdate = true;
+        bcoldA.needsUpdate = true;
         bliveAny = any;
       }
     },

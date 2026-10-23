@@ -9,6 +9,7 @@ import { FIELD, BALL, EMBERS, DROPS, RING, PADDLE, DROP, DROP_FAMILY } from '../
 import { LOOK } from './look.js';
 import { PAL, glassMaterial } from './materials.js';
 import { withOutput } from './shaders.js';
+import { LASER_MOUNT, laserMountsActive, laserMountPose, laserMuzzleFlash } from './laser-mounts.js';
 
 const HW = FIELD.W / 2;
 const HH = FIELD.H / 2;
@@ -200,6 +201,50 @@ export function createActors(scene, M) {
   arc.add(arcBlade, arcTop, arcLine, arcFlare, arcCatch);
   pad.add(arc);
 
+  // Laser is visible equipment, even while a served/Catch ball is held. Both narrow mounts sit
+  // inside the paddle's existing width; they neither widen its silhouette along the bounce face
+  // nor change its collider. Their tips are the real bolt origins, independent of cosmetic lean.
+  const laserRig = new THREE.Group();
+  laserRig.name = 'laser-emitters';
+  root.add(laserRig);
+  const laserHousingMat = M.darkMetalP.clone();
+  laserHousingMat.roughness = 0.32;
+  laserHousingMat.emissive = new THREE.Color(0x202730);
+  laserHousingMat.emissiveIntensity = 0.8;
+  const laserTipMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(1, 0.92, 0.78).multiplyScalar(0.95) });
+  const laserFlashMat = new THREE.MeshBasicMaterial({
+    color: new THREE.Color(1, 0.97, 0.92).multiplyScalar(1.8), transparent: true,
+    opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false,
+  });
+  const housingGeo = new RoundedBoxGeometry(LASER_MOUNT.WIDTH, LASER_MOUNT.LENGTH, 16, 2, 2);
+  const collarGeo = new RoundedBoxGeometry(LASER_MOUNT.WIDTH, 6, 17, 2, 1.5);
+  const tipGeo = new THREE.BoxGeometry(10, 5, 16.5);
+  const laserMounts = [];
+  for (let k = 0; k < 2; k++) {
+    const mount = new THREE.Group();
+    mount.name = `laser-emitter-${k}`;
+    mount.visible = false;
+    const hardware = new THREE.Group();
+    hardware.name = `laser-hardware-${k}`;
+    const housing = new THREE.Mesh(housingGeo, laserHousingMat);
+    housing.position.set(0, -LASER_MOUNT.LENGTH / 2, 8);
+    const collar = new THREE.Mesh(collarGeo, padTitanium);
+    collar.position.set(0, -LASER_MOUNT.LENGTH + 3, 8);
+    const tip = new THREE.Mesh(tipGeo, laserTipMat);
+    tip.name = `laser-ready-tip-${k}`;
+    tip.position.set(0, -2.5, 8.5);
+    hardware.add(housing, collar, tip);
+    const flash = new THREE.Mesh(new THREE.PlaneGeometry(8, 10), laserFlashMat);
+    flash.name = `laser-muzzle-flash-${k}`;
+    flash.position.set(0, 3, 18);
+    flash.renderOrder = 9;
+    flash.visible = false;
+    mount.add(hardware, flash);
+    laserRig.add(mount);
+    laserMounts.push({ mount, hardware, tip, flash });
+  }
+  const mountPose = { x: 0, y: 0, nx: 0, ny: 0, rotation: 0 };
+
   // Afterimage ghosts (ART 8: 30% and 15% of the paddle glass alpha, trailing 80 / 160 ms)
   const ghosts = [0.3, 0.15].map((f, k) => {
     const gm = glassMaterial({ aMin: 0.3, aMax: 0.9, color: 0x1a1e26, env: 2.6 });
@@ -217,7 +262,7 @@ export function createActors(scene, M) {
     return { g, gb, ga, gArc };
   });
 
-  const padState = { flareT: -1e9, tick: 0 };
+  const padState = { flareT: -1e9, laserT: -1e9, tick: 0 };
 
   // ---------------------------------------------------------------- ember pickups
   const emberGeo = new THREE.DodecahedronGeometry(3.6, 0);
@@ -327,6 +372,20 @@ export function createActors(scene, M) {
       catchLine.visible = catchOn;
       catchLine.scale.set(w - 4, 1, 1);
       catchLine.position.set(0, p.h / 2 + 1.4, LOOK.PADDLE_DEPTH / 2 - 2);
+    }
+    const laserOn = laserMountsActive(world);
+    const muzzle = laserMuzzleFlash(t, padState.laserT);
+    laserFlashMat.opacity = muzzle;
+    for (let k = 0; k < 2; k++) {
+      const m = laserMounts[k];
+      m.mount.visible = laserOn || muzzle > 0;
+      m.hardware.visible = laserOn;
+      m.tip.visible = laserOn;
+      m.flash.visible = muzzle > 0;
+      if (!m.mount.visible) continue;
+      laserMountPose(mode, p, k === 0 ? -1 : 1, mountPose);
+      m.mount.position.set(mountPose.x - HW, HH - mountPose.y, 0);
+      m.mount.rotation.z = mountPose.rotation;
     }
     // ghosts trail the paddle along its track
     const on = !!world.level.rules.ghosts;
@@ -456,11 +515,17 @@ export function createActors(scene, M) {
     setWorld(world) {
       mode = world.level.mode;
       padState.flareT = -1e9;
+      padState.laserT = -1e9;
       padState.tick = 0;
     },
 
     perfect(t) {
       padState.flareT = t;
+    },
+
+    /** Only an actual emitted volley flashes the two real muzzles. */
+    laserFired(t) {
+      padState.laserT = t;
     },
 
     /** An ember catch ticks the paddle heat line. */

@@ -8,6 +8,7 @@
 import { h, pad2 } from '../dom.js';
 import { panel, button, stat } from './parts.js';
 import { formatScore } from '../layout.js';
+import { forgeProgressFact } from '../resources.js';
 
 export const COUNT = Object.freeze({ DELAY_MS: 180, MS: 450, BONUS_LEAD_MS: 60, STAGGER_MS: 40 });
 
@@ -44,7 +45,15 @@ export function results(data, { el, nav, reduceMotion }) {
   let bonusStat = null;
   if (bonus > 0) { bonusStat = stat('Clear bonus', `+${formatScore(bonus)}`); stats.push(bonusStat); }
   if (k === 'over' && data.reached) stats.push(stat('Reached', data.reached));
-  stats.push(stat('Embers', formatScore(data.embers | 0)));
+  stats.push(stat(runHero ? 'Run embers' : 'Level embers', formatScore(data.embers | 0)));
+  let rewards = null;
+  if (data.rewards) {
+    const r = data.rewards;
+    rewards = h('div.resource-summary',
+      h('p', `${data.rewardScope || 'This level'}: ${r.caught | 0} caught · ${r.auto | 0} auto-banked`),
+      h('p.wallet', `Forge wallet ${formatScore(r.wallet | 0)} · +${formatScore(r.forgeGain | 0)}`),
+      h('p', forgeProgressFact(r)));
+  }
   // a new best is a tag on the hero (the number is already there); the old best only when it differs
   const newBest = !!data.newBest && !runHero;
   if (data.best && !newBest && (runHero || (data.best | 0) !== heroValue)) stats.push(stat('Best', formatScore(data.best)));
@@ -73,6 +82,7 @@ export function results(data, { el, nav, reduceMotion }) {
       data.name || data.flawless ? h('div.sub', [data.name, data.flawless ? 'Flawless' : ''].filter(Boolean).join('  ·  ')) : null,
       h('div.hero-wrap', hero),
       h('div.stats', stats),
+      rewards,
       install,
       h('div.foot', map, next))));
 

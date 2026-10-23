@@ -379,7 +379,7 @@ const LEVELS = [
     mode: 'bottom',
     tier: 2,
     adds: 'Final boss: The Core',
-    hint: '3 fields, 1 core.',
+    hint: '3 fields. The armour gaps lead to the core.',
     continues: 'core-2',
     rows: [
       '............',
@@ -419,7 +419,7 @@ const LEVELS = [
     tier: 2,
     stage: 2,
     continues: 'core-3',
-    hint: 'The field turns.',
+    hint: 'The paddle is on the left. The turning gap leads to the core.',
     // (kept at x 510: two columns nearer the paddle gave the far wall its full 120, but the
     // perfect robot then won the stage in one stay; the far wall stands 64 past the ring, inside
     // A2's horizontal rule)
@@ -451,7 +451,7 @@ const LEVELS = [
     mode: 'ring',
     tier: 2,
     stage: 3,
-    hint: 'Two rings turn against each other.',
+    hint: 'Two rings turn against each other. Their gaps line up.',
     rows: ringRows((dx, dy, d, a) => {
       if (d < 30) return 'W';
       const bottom = near(a, Math.PI / 2, 0.45);

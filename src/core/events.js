@@ -70,6 +70,7 @@ export const EV = Object.freeze({
   STAGE_CLEARED: 92,  // The Core stages 1 and 2: weak point out, the next stage world follows; x, y; a = stage
   BOSS_GUARD: 93,     // id = core brick; x, y; a = 1 the core cooled (its two hits for this entry are in: it ignores hits), a = 0 hot again (every ball is out)
   BOSS_BLOCKED: 94,   // id = core brick; x, y; a core contact that did not count: a = 1 the core is cooled, a = 0 under 500 ms since the last counted hit
+  HAZARD_HEAT_LOST: 95, // id = hazard; x, y = contact; a = HAZARD kind; b = actual HEAT removed (capped at available HEAT). B writes after addHeat
 
   // ---- E economy (src/economy) ----
   EMBERS_BURST: 110,  // x, y; a = count spawned

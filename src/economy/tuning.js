@@ -129,7 +129,7 @@ export const FORGE_FX = freeze({
   FREE_MISS: [0, 0, 0, 1],
   HEAT_MAX: [100, 120, 140, 160],
   PADDLE_ADD: [0, 10, 20, 30],
-  EMBER_VALUE: [1, 1.25, 1.5, 2],     // embers banked per ember caught
+  EMBER_VALUE: [1, 1.25, 1.5, 2],     // embers banked per ember earned
   // Overload power: every rank shortens the vent (the thing that limits Overloads) and makes
   // each Overload stronger where a step fits (Purge rows, Quench seconds, Fork balls per ball).
   VENT_MS: [OVERLOAD_VENT_MS, 10000, 8000, 6000],

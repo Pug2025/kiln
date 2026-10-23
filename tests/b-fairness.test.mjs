@@ -1,4 +1,4 @@
-// B: fairness of hazards and bosses for a person, not just the robot (src/content/sentries.js,
+// B: hazard reaction margins and deterministic controller regressions (src/content/sentries.js,
 // bosses/stoker.js, content.js HAZARD_HIT). PLAN §1 frustration fixes: no ball-eating holes,
 // shrink only from a red drop the player chose to catch, every attack readable.
 
@@ -6,13 +6,34 @@ import { test, assert } from './lib.mjs';
 import { HAZARD, PADDLE, RING, HORIZONTAL, DROP } from '../src/core/constants.js';
 import { LEVELS, getLevel, stagesOf } from '../src/levels/index.js';
 import { generateOverburn } from '../src/levels/overburn.js';
-import { createWorld } from '../src/core/world.js';
+import { createWorld, stepWorld, setPhase } from '../src/core/world.js';
+import { createInputFrame } from '../src/core/input-frame.js';
+import { createReader, next } from '../src/core/bus.js';
+import { EV } from '../src/core/events.js';
 import { runHeadless } from '../src/core/headless.js';
 import { makeSystems } from '../src/systems.js';
 import { createRun } from '../src/economy/economy.js';
 import { createRobot } from '../src/sim/robot.js';
 import { contentWorld } from './fixtures/B/helpers.mjs';
 import { createSloppyRobot } from './fixtures/B/sloppy.mjs';
+
+test('hazard feedback reports the actual HEAT lost, capped by the meter, for slag, bombs and bolts', () => {
+  for (const kind of [HAZARD.SLAG, HAZARD.BOMB, HAZARD.BOLT]) for (const heat of [70, 7, 0]) {
+    const run = createRun({ seed: 1, levelN: 10 });
+    const w = createWorld({ level: getLevel(10), seed: 1, run, systems: makeSystems() });
+    w.econ.heat = heat;
+    setPhase(w, 'play');
+    const rd = createReader(w.bus, 'hazard-feedback-test', 0);
+    const slot = w.api.spawnHazard(w.paddle.x, w.paddle.y, 0, 200, kind, 14);
+    stepWorld(w, createInputFrame());
+    const lost = [];
+    while (next(rd)) if (rd.type === EV.HAZARD_HEAT_LOST) lost.push({ id: rd.id, kind: rd.a, lost: rd.b });
+    assert.deepEqual(lost, [{ id: slot, kind, lost: Math.min(25, heat) }], `kind ${kind}, starting HEAT ${heat}`);
+    assert.equal(w.econ.heat, Math.max(0, heat - 25));
+    assert.equal(w.run.lives, 3, 'a hazard never takes a life');
+    assert.equal(w.econ.effectMs[DROP.SHRINK], 0, 'a hazard never shrinks the paddle');
+  }
+});
 
 /** Seconds a hazard needs from its spawn point to the paddle line (the paddle face, less its radius). */
 function secondsToPaddle(mode, h) {
@@ -107,7 +128,7 @@ function sloppyClears(n, seeds, err) {
   return { median: times[times.length >> 1], over };
 }
 
-test('The Stoker is fair for an imprecise player: within 1.5x of levels 8 and 9, no run lost (aim error ±12)', () => {
+test('The Stoker predictive controller regression: within 1.5x of levels 8 and 9, no run lost (aim error ±12)', () => {
   const seeds = [1, 2, 3, 4];
   const ref = [8, 9].map((n) => sloppyClears(n, seeds, 12));
   const stoker = sloppyClears(10, seeds, 12);

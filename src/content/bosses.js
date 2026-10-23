@@ -30,7 +30,7 @@ import { createOrbitBoss, CRUCIBLE_SPEC, CORE_SPECS, CRUCIBLE_PARTS, CORE_PARTS 
 export const BOSS_PARTS = Object.freeze({
   stoker: Object.freeze([
     { group: STOKER_PARTS.HEAD, name: 'head', what: 'furnace head: titanium plates (B cells); deflect the ball; sway in phase 2' },
-    { group: STOKER_PARTS.JAW, name: 'jaw', what: 'chin row of armoured plates (A cells); 3 ball hits or 1 laser/fire; regrow at phase 2' },
+    { group: STOKER_PARTS.JAW, name: 'jaw', what: 'chin row of armoured plates (A cells); 2 ball hits or 1 laser/fire; reform once at phase 2, then openings stay open' },
     { group: STOKER_PARTS.CORE, name: 'core', what: 'white-hot core inside the mouth (the W cells fused into one brick); 5 hits' },
   ]),
   crucible: Object.freeze([

@@ -75,6 +75,9 @@ export function createEconomy() {
   const weights = new Float64Array(DROP_COUNT);
   // Explosive bricks an Overload broke: their blast is the Overload's work too (no embers).
   const overloadBlast = new Uint8Array(POOL.BRICKS);
+  // Boss death is a guaranteed visual cascade. Its rewards settle at the win, not half a
+  // second later; the same brick slots must never pay twice when their break events arrive.
+  const prepaidBoss = new Uint8Array(POOL.BRICKS);
   const st = {
     blastByOverload: false, // the current blast (last EXPLOSION read) was set off by an Overload
     laserShots: 0,
@@ -181,6 +184,7 @@ export function createEconomy() {
   }
 
   function onDropCaught(world, kind, x, y) {
+    if (st.awarded || (world.level.total > 0 && world.level.remaining <= 0)) return;
     if (kind < 0 || kind >= DROP_COUNT) return;
     world.econ.dropsCaught++;
     if (kind === DROP.LIFE && world.run.lives >= LIVES.MAX) addScore(world, SCORE.LIFE_AT_MAX, x, y);
@@ -205,7 +209,14 @@ export function createEconomy() {
     return own;
   }
 
-  function onBrickBroken(world, i, x, y, type, src) {
+  /** Currency settlement is not a paddle catch: no fabricated HEAT, combo or score. */
+  function bankUncaught(world, n) {
+    if (!(n > 0)) return;
+    world.econ.embersAutoBanked += n;
+    world.run.embersBanked += n;
+  }
+
+  function rewardBrick(world, i, x, y, type, src, autoBank) {
     const e = world.econ;
     const rng = world.rng.economy;
     e.bricksBroken++;
@@ -216,8 +227,11 @@ export function createEconomy() {
     if (!byOverload(i, type, src)) {
       let n = rng.int(EMBERS.MIN, EMBERS.MAX);
       if (st.burst && rng.chance(MOD_FX.BURST_CHANCE)) n *= 2;
-      const made = world.api.spawnEmbers(x, y, n);
-      if (made) emit(world.bus, EV.EMBERS_BURST, 0, x, y, made);
+      if (autoBank) bankUncaught(world, n);
+      else {
+        const made = world.api.spawnEmbers(x, y, n);
+        if (made) emit(world.bus, EV.EMBERS_BURST, 0, x, y, made);
+      }
     }
     // Drops: carriers always release one (fixed kind or the table); other bricks by the rate.
     // None once the level is won (a boss's defeat shower, chain breaks after the last brick):
@@ -233,6 +247,12 @@ export function createEconomy() {
       const kind = rng.weighted(weights);
       if (kind >= 0) spawnDrop(world, x, y, kind);
     }
+  }
+
+  function onBrickBroken(world, i, x, y, type, src) {
+    if (src === SRC.BOSS && i >= 0 && i < prepaidBoss.length && prepaidBoss[i]) return;
+    if (st.awarded || st.cleared) return; // the settled result cannot be farmed during its ceremony
+    rewardBrick(world, i, x, y, type, src, world.level.total > 0 && world.level.remaining <= 0);
   }
 
   function onOutOfBalls(world) {
@@ -280,6 +300,17 @@ export function createEconomy() {
     if (st.awarded) return;
     st.awarded = true;
     const e = world.econ;
+    // Existing airborne embers are earned; already missed ones are no longer alive and stay
+    // missed. A owns the pools and clears capsules without applying any of their effects.
+    bankUncaught(world, world.api.settlePickups());
+    const B = world.bricks;
+    if (world.boss.hp <= 0 && world.boss.data.dying) {
+      for (let i = 0; i < B.count; i++) {
+        if (!B.alive[i] || !(B.flags[i] & BF.BOSS) || prepaidBoss[i]) continue;
+        prepaidBoss[i] = 1;
+        rewardBrick(world, i, B.x[i], B.y[i], B.type[i], SRC.BOSS, true);
+      }
+    }
     e.flawless = e.livesLost === 0;
     e.clearBonus = clearBonus(world.level.n, e.flawless);
     addFlat(world, e.clearBonus, FIELD.W / 2, FIELD.H / 2);
@@ -444,6 +475,7 @@ export function createEconomy() {
       st.cleared = false;
       st.blastByOverload = false;
       overloadBlast.fill(0);
+      prepaidBoss.fill(0);
       tableWeights(def.drops, weights);
       // Level state.
       e.heatMax = FORGE_FX.HEAT_MAX[ranks.heat] ?? HEAT.MAX;
@@ -461,6 +493,7 @@ export function createEconomy() {
       e.clearBonus = 0;
       e.cavityBonus = 0;
       e.flawless = false;
+      e.embersAutoBanked = 0;
       e.effectMs.fill(0);
       // Fixed effects from the run.
       const fx = world.effects;
@@ -474,6 +507,7 @@ export function createEconomy() {
       world.api.addScore = (p, x = 0, y = 0) => addScore(world, p, x, y);
       world.api.addHeat = (n) => addHeat(world, n);
       world.api.applyDrop = (kind) => {
+        if (st.awarded || (world.level.total > 0 && world.level.remaining <= 0)) return;
         if (kind >= 0 && kind < DROP_COUNT) applyDropEffect(world, kind);
       };
     },
@@ -488,6 +522,7 @@ export function createEconomy() {
             break;
           case EV.BRICK_SPAWNED:
             if (rd.id >= 0 && rd.id < overloadBlast.length) overloadBlast[rd.id] = 0; // a reused slot
+            if (rd.id >= 0 && rd.id < prepaidBoss.length && !st.awarded) prepaidBoss[rd.id] = 0;
             break;
           case EV.EXPLOSION: {
             // The breaks that follow belong to this blast: an Overload's if it broke this brick.
@@ -497,6 +532,7 @@ export function createEconomy() {
             break;
           }
           case EV.EMBER_CAUGHT:
+            if (st.awarded) break;
             e.embersCaught++;
             world.run.embersBanked++;
             st.pace += 1;
@@ -509,7 +545,7 @@ export function createEconomy() {
             break;
           case EV.PERFECT_HIT:
             // The Splitter ball's split happens in physics at the contact (A, perfect()).
-            addScore(world, SCORE.PERFECT, rd.x, rd.y);
+            if (!st.awarded) addScore(world, SCORE.PERFECT, rd.x, rd.y);
             break;
           case EV.LAUNCH:
             if (st.slowStart) st.slowStartMs = MOD_FX.SLOW_START_MS;
@@ -529,13 +565,13 @@ export function createEconomy() {
             e.cavityFreed = true;
             break;
           case EV.SENTRY_KILLED:
-            addScore(world, SCORE.SENTRY, rd.x, rd.y);
+            if (!st.awarded) addScore(world, SCORE.SENTRY, rd.x, rd.y);
             break;
           case EV.BOSS_HIT:
-            addScore(world, SCORE.BOSS_HIT, rd.x, rd.y);
+            if (!st.awarded) addScore(world, SCORE.BOSS_HIT, rd.x, rd.y);
             break;
           case EV.BOSS_DEFEATED:
-            addFlat(world, SCORE.BOSS_DEFEATED, rd.x, rd.y);
+            if (!st.awarded) addFlat(world, SCORE.BOSS_DEFEATED, rd.x, rd.y);
             break;
           case EV.PHASE:
             if (rd.a === PHASE_CODE.cleared) onCleared(world);

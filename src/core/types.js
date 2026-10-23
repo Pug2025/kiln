@@ -372,6 +372,7 @@
  * @property {number} mult       1, 2, 3 or 5
  * @property {number} levelScore
  * @property {number} embersCaught
+ * @property {number} embersAutoBanked  E: earned embers secured at a win, without catch HEAT/combo/score
  * @property {number} dropsCaught
  * @property {number} bricksBroken
  * @property {number} overloadCost  HEAT needed for the equipped Overload
@@ -454,6 +455,7 @@
  * @property {(extraPerBall:number) => number} splitBalls                        A → balls created
  * @property {() => void} serve                                                   A: new ball on the paddle
  * @property {(x:number, y:number, n:number) => number} spawnEmbers             A → embers created
+ * @property {() => number} settlePickups  A: deactivate current ember/capsule pools; return live ember count without catch events
  * @property {(x:number, y:number, kind:number) => number} spawnDrop             A → slot or −1
  * @property {(x:number, y:number, vx:number, vy:number, kind:number, r:number) => number} spawnHazard  A
  * @property {(i:number, dmg:number, src:number, ball:number) => void} damageBrick  B
@@ -556,6 +558,7 @@
  * @property {(world:World) => void} hud                  per frame; touches the DOM only on change
  * @property {(rect:FieldRect) => void} layout
  * @property {(text:string) => void} toast
+ * @property {(kind:number, lost:number) => void} hudHazardHit  actual capped HEAT loss, supplied by content (D displays)
  */
 
 /**

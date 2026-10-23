@@ -281,7 +281,7 @@ const LEVELS = [
     tier: 2,
     gate: true,
     adds: 'Boss: The Crucible',
-    hint: 'The ring has one gap.',
+    hint: 'The gap leads to the core. At half health, the ring reverses.',
     rows: [
       '............',
       'aa........aa',

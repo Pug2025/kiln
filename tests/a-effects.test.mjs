@@ -6,6 +6,22 @@ import { physicsWorld, launchAt, recorder, steps, SOLID } from './fixtures/A/sim
 
 const stillPaddle = (frame, x = 360) => { frame.steer = true; frame.tx = x; frame.ty = 1000; };
 
+test('clear pickup settlement returns only live embers once and never fabricates catch events', () => {
+  for (const mode of ['bottom', 'left', 'ring']) {
+    const { world } = physicsWorld({ mode });
+    world.api.spawnEmbers(360, 540, 5);
+    world.embers.alive[1] = 0; // already missed/caught: not collectible now
+    world.api.spawnDrop(360, 540, 0);
+    world.api.spawnDrop(360, 540, 8); // bad capsule must not be applied
+    const rec = recorder(world);
+    assert.equal(world.api.settlePickups(), 4);
+    assert.ok(world.embers.alive.every(a => !a));
+    assert.ok(world.drops.every(d => !d.alive));
+    assert.equal(world.api.settlePickups(), 0, 'the same pickups cannot pay again');
+    assert.deepEqual(rec(), [], 'settling does not emit physical catch or power events');
+  }
+});
+
 test('lasers: one volley of two bolts per press, each stops at the first solid brick', () => {
   const { world, frame } = physicsWorld({ bricks: [{ x: 330, y: 300 }, { x: 390, y: 300 }, { x: 330, y: 240 }] });
   world.effects.laserShots = 5;

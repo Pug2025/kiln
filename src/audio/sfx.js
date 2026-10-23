@@ -357,6 +357,13 @@ export function createSfx(ctx, dry, wet) {
       if (heavy) osc('sine', 90, 45, t, 0.2, voiceOut(t, 0.5, 0.003, 0.18, 0, 0));
     },
 
+    /** A protected core deflects: short, low and dry, without the counted hit's ringing tail. */
+    bossBlocked(t, x) {
+      const pan = panFor(x);
+      osc('sine', 135, 90, t, 0.075, voiceOut(t, 0.18, 0.001, 0.07, pan));
+      noise(brown, 'lowpass', 480, 0, 0.7, t, 0.045, voiceOut(t, 0.1, 0.001, 0.04, pan));
+    },
+
     /** The paddle is hit by slag or a bomb. */
     hazard(t, x) {
       const lp = ctx.createBiquadFilter();

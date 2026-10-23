@@ -9,6 +9,7 @@ import { forge } from './forge.js';
 import { settings } from './settings.js';
 import { credits } from './credits.js';
 import { card } from './card.js';
+import { guide } from './guide.js';
 
 export const SCREENS = {
   title,
@@ -21,4 +22,5 @@ export const SCREENS = {
   settings,
   credits,
   card,
+  guide,
 };

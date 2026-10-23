@@ -11,7 +11,7 @@
 //   kiln-runtime-v1    three.js from jsDelivr and Google Fonts (CSS and font files), cache-first
 // Navigation always answers with the cached index.html (query strings such as ?level are ignored).
 
-const BUILD = '2026-10-22T2234Z-db84c51';
+const BUILD = '2026-10-23T1416Z-e9b0e4c';
 const CORE = `kiln-core-${BUILD}`;
 const RUNTIME = 'kiln-runtime-v1';
 const CDN = /^https:\/\/(cdn\.jsdelivr\.net\/npm\/three@0\.160\.0\/|fonts\.googleapis\.com\/|fonts\.gstatic\.com\/)/;
@@ -131,6 +131,7 @@ const FILES = [
   'src/levels/parser.js',
   'src/main.js',
   'src/render/actors.js',
+  'src/render/boss-feedback.js',
   'src/render/boss.js',
   'src/render/bricks.js',
   'src/render/ceiling.js',
@@ -142,6 +143,7 @@ const FILES = [
   'src/render/headroom.js',
   'src/render/kiln.js',
   'src/render/kit.js',
+  'src/render/laser-mounts.js',
   'src/render/look.js',
   'src/render/marks.js',
   'src/render/materials.js',
@@ -170,9 +172,11 @@ const FILES = [
   'src/ui/icons.js',
   'src/ui/layout.js',
   'src/ui/nav.js',
+  'src/ui/resources.js',
   'src/ui/screens/card.js',
   'src/ui/screens/credits.js',
   'src/ui/screens/forge.js',
+  'src/ui/screens/guide.js',
   'src/ui/screens/index.js',
   'src/ui/screens/map.js',
   'src/ui/screens/parts.js',

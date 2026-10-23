@@ -19,7 +19,7 @@ const LEVELS = [
     mode: 'bottom',
     tier: 0,
     adds: 'Embers and Wide',
-    hint: 'Embers build combo. Wide drops widen the paddle.',
+    hint: 'Embers buy Forge upgrades. Wide drops widen the paddle.',
     rows: [
       '...aaaaaa...',
       '....bbbb....',
@@ -63,7 +63,7 @@ const LEVELS = [
     mode: 'bottom',
     tier: 0,
     adds: 'Good drops',
-    hint: 'Wide, Slow and Multi.',
+    hint: 'Marked drops grant powers. Small embers buy Forge upgrades.',
     rows: [
       'cccccccccccc',
       'aaaaaaaaaaaa',
@@ -174,7 +174,7 @@ const LEVELS = [
     mode: 'bottom',
     tier: 0,
     adds: 'Pull and HEAT',
-    hint: 'Pull draws the ball toward the paddle and spends HEAT.',
+    hint: 'HEAT fuels Pull. 100 HEAT buys one Shield per level.',
     rows: [
       'cc........cc',
       'c..........c',
@@ -248,7 +248,7 @@ const LEVELS = [
   },
   {
     // BOSS: a furnace head. Break the armoured jaw, hit the white-hot core five times (after the
-    // first the jaw shuts behind every ball that scores, never on a timer); slag blobs fall
+    // first the jaw reforms once, safely after all balls leave); later openings stay open. Slag falls
     // toward the paddle. Two carriers in the lower corners: Laser (one plate a bolt), Wide. No
     // Fire here: its splash broke 3 jaw plates a hit and the fight was over in 20 s.
     n: 10,
@@ -260,7 +260,7 @@ const LEVELS = [
     mode: 'bottom',
     tier: 1,
     adds: 'Boss: The Stoker',
-    hint: 'The core sits behind the armoured jaw.',
+    hint: 'Jaw plates take 2 hits or 1 laser. The core takes 5 hits.',
     rows: [
       '............',
       '..BBBBBBBB..',

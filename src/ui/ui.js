@@ -3,7 +3,7 @@
 //
 // Contract (src/core/types.js → UI):
 //   createUI(root, ctx) → UI
-//   show(name, data)  a glass screen ('title' 'map' 'forge' 'settings' 'pause' 'results' 'credits'
+//   show(name, data)  a glass screen ('title' 'map' 'forge' 'guide' 'settings' 'pause' 'results' 'credits'
 //                     'pick' 'gate'), the level card overlay ('card'), or null (live play: HUD only)
 //   hud(world)        per frame; touches the DOM only when a shown value changed
 //   layout(rect)      the field's screen rect from renderer.fieldRect(); the HUD is glued to it
@@ -173,6 +173,8 @@ export function createUI(root, ctx = {}) {
     setReadyLabel(text) { hud.setReadyLabel(text); },
     /** A short fact under the score for a moment (e.g. "Free miss"). */
     hudNote(text) { hud.note(text, performance.now()); },
+    /** A real hazard contact reports only the HEAT the content layer actually removed. */
+    hudHazardHit(kind, lost) { hud.hazardHit(kind, lost, performance.now()); },
     /** Name the opening's first real power cell; Multi has no timed label of its own. */
     hudOpeningDrop(kind, caught = false, count = 0) { hud.openingDrop(kind, caught, count, performance.now()); },
 

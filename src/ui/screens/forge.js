@@ -42,7 +42,7 @@ export function forge(data, { el, nav }) {
   nav.add(back, () => data.onBack());
 
   function paint() {
-    balance.replaceChildren(stat('Embers', formatScore(model.embers | 0)));
+    balance.replaceChildren(stat('Forge wallet', formatScore(model.embers | 0)));
     model.items.forEach((it, i) => {
       const r = rows[i];
       r.name.textContent = it.name;
@@ -57,6 +57,7 @@ export function forge(data, { el, nav }) {
   }
   paint();
   el.appendChild(h('div.stack.wide', panel('The Forge',
+    h('div.sub', 'Permanent ember currency. Upgrades apply to your next run.'),
     h('div.stats', balance),
     h('div.scroll', rows.map((r) => r.el)),
     ballRow ? h('div.menu', ballRow) : null,
