@@ -20,6 +20,10 @@ import { SCREENS } from './screens/index.js';
 
 const EXIT_MS = 120;
 const ENTER_MS = 180;
+const SCREEN_LABELS = Object.freeze({
+  title: 'Kiln', map: 'Levels', forge: 'The Forge', guide: 'How to play', settings: 'Settings',
+  pause: 'Paused', results: 'Results', credits: 'Credits', pick: 'Choose an upgrade', gate: 'Choose a route',
+});
 
 /**
  * @param {HTMLElement} root
@@ -76,7 +80,7 @@ export function createUI(root, ctx = {}) {
     const el = document.createElement('div');
     el.className = `screen screen-${name}`;
     el.setAttribute('role', 'dialog');
-    el.setAttribute('aria-label', name);
+    el.setAttribute('aria-label', (data && data.kicker) || SCREEN_LABELS[name] || name);
     const nav = createNav(el, { reduceMotion, sound });
     const scr = build(data || {}, { el, nav, safe, fieldRect, reduceMotion, sound }) || {};
     layer.appendChild(el);

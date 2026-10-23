@@ -33,7 +33,7 @@ export function createHud(root, opts = {}) {
       <div class="srow"><div class="num score" data-k="score">0</div><div class="sfx"><span class="mult" data-k="mult"></span><span class="delta" data-k="delta"></span></div></div>
     </div></div>
     <div class="hb hud-heat"><div class="hi">
-      <div class="heat-row" data-k="heatRow"><span class="k">Heat</span><span class="track"><span class="vent" data-k="vent"></span><span class="fill" data-k="heat"></span></span><span class="ready">Ready</span></div>
+      <div class="heat-row" data-k="heatRow"><span class="k" data-k="heatLabel">Heat</span><span class="track"><span class="vent" data-k="vent"></span><span class="fill" data-k="heat"></span></span><span class="ready">Ready</span></div>
       <div class="boss-fact" data-k="bossFact" hidden></div>
       <div class="fx-row" data-k="fxRow">${FX_LABEL.map((n, i) => `<span class="fx ${DROP_FAMILY[i]}" hidden>${i === DROP.LASER ? '<span data-k="laserLabel">Laser</span>' : n}<b></b><i><u></u></i></span>`).join('')}<span class="fx cold" data-k="shield" hidden>Shield<b></b><i><u></u></i></span></div>
       <div class="drop-fact" data-k="dropFact" role="status" aria-live="polite" aria-atomic="true" hidden><span data-k="dropName"></span><span data-k="dropEffect"></span></div>
@@ -79,7 +79,7 @@ export function createHud(root, opts = {}) {
   // last shown values (-1 / null = never shown)
   const last = {
     score: -1, mult: -1, level: -1, name: null, lives: -1, last: null, heat: -1, heatOn: null,
-    ready: null, clock: -1, timed: null, boss: -1, bossOn: null, shield: -1, vent: -1, ventPeak: 0,
+    ready: null, clock: -1, timed: null, boss: -1, bossOn: null, shield: -1, vent: -1, ventPeak: 0, pulling: null,
     fxOn: new Int8Array(DROP_COUNT).fill(-1), fxQ: new Int16Array(DROP_COUNT).fill(-1),
     fxN: new Int16Array(DROP_COUNT).fill(-1), deltaUntil: 0, deltaOn: false, noteUntil: 0,
     dropUntil: 0, dropSeen: 0, bossLabel: '', bossFact: '', bossAria: '', laserLabel: '', contextOn: null,
@@ -91,6 +91,7 @@ export function createHud(root, opts = {}) {
   function reset() {
     last.score = -1; last.mult = -1; last.level = -1; last.name = null; last.lives = -1; last.last = null;
     last.heat = -1; last.heatOn = null; last.ready = null; last.clock = -1; last.timed = null;
+    last.pulling = null;
     last.boss = -1; last.bossOn = null; last.shield = -1; last.vent = -1; last.ventPeak = 0;
     last.fxOn.fill(-1); last.fxQ.fill(-1); last.fxN.fill(-1);
     peak.fill(0);
@@ -285,6 +286,13 @@ export function createHud(root, opts = {}) {
       const heatOn = !!lvl.rules.heat;
       if (heatOn !== last.heatOn) { last.heatOn = heatOn; k.heatRow.hidden = !heatOn; }
       if (heatOn) {
+        const pulling = !!world.paddle?.pulling;
+        if (pulling !== last.pulling) {
+          last.pulling = pulling;
+          k.heatLabel.textContent = pulling ? 'Pull' : 'Heat';
+          k.heatRow.classList.toggle('pulling', pulling);
+          k.heatRow.setAttribute('aria-label', pulling ? 'Pull active; using HEAT' : 'HEAT');
+        }
         const h = Math.round((econ.heat / (econ.heatMax || 100)) * 100);
         if (h !== last.heat) { last.heat = h; k.heat.style.transform = `scaleX(${h / 100})`; }
         // after an Overload the kiln vents (E): a white line on the track empties over the vent
@@ -316,7 +324,7 @@ export function createHud(root, opts = {}) {
         }
       }
       const won = lvl.total > 0 && lvl.remaining <= 0;
-      const fact = bossOn && !won ? bossFact(world) : resourceFact(world);
+      const fact = bossOn && !won ? bossFact(world) : resourceFact(world, coarse.matches);
       if (fact !== last.bossFact) { last.bossFact = fact; k.bossFact.textContent = fact; }
       const contextOn = !last.dropUntil;
       if (contextOn !== last.contextOn) {
@@ -363,10 +371,10 @@ export function createHud(root, opts = {}) {
 function bossFact(world) {
   const boss = world.boss;
   if (boss.hp <= 0) return boss.id === 'core' && boss.phase < 3 ? 'Stage complete' : 'Core broken';
-  if (boss.data?.guard) return 'Core cooling briefly';
+  if (boss.data?.guard) return 'Core briefly protected';
   if (boss.id !== 'stoker') return boss.id === 'core' && boss.phase === 3
-    ? 'Aligned gaps → core' : 'Gap → core';
-  if (boss.data?.jawRepairPending) return 'One jaw repair · damage stays';
+    ? 'Hit core through both gaps' : 'Hit core through the gap';
+  if (boss.data?.jawRepairPending) return 'Jaw repairing; damage kept';
   const B = world.bricks;
   if (B) {
     // An outer jaw opening is not a route to the core. Only a missing plate directly below the
@@ -376,9 +384,9 @@ function bossFact(world) {
     if (core >= 0) {
       for (let i = 0; i < B.count; i++) {
         if (B.alive[i] || B.type[i] !== BRICK.ARMOURED || B.y[i] <= B.y[core]) continue;
-        if (Math.abs(B.x[i] - B.x[core]) < (B.w[i] + B.w[core]) / 2) return 'Jaw open → core';
+        if (Math.abs(B.x[i] - B.x[core]) < (B.w[i] + B.w[core]) / 2) return 'Jaw open: hit the core';
       }
     }
   }
-  return 'Break jaw → core';
+  return 'Break a plate below the core';
 }

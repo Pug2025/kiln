@@ -6,6 +6,7 @@ const IOS_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebK
 const ANDROID_UA = 'Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36';
 
 export const DEVICES = Object.freeze({
+  smallphone: { name: 'Small phone viewport', width: 320, height: 568, dpr: 2, mobile: true, touch: true, ua: IOS_UA },
   mobile: { name: 'Phone (built-in browser mobile preset)', width: 375, height: 812, dpr: 3, mobile: true, touch: true, ua: IOS_UA },
   iphone14pro: { name: 'iPhone 14 Pro', width: 390, height: 844, dpr: 3, mobile: true, touch: true, ua: IOS_UA },
   pixel7: { name: 'Pixel 7', width: 412, height: 915, dpr: 2.625, mobile: true, touch: true, ua: ANDROID_UA },

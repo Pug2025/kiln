@@ -1,12 +1,16 @@
 // Resource facts use the real equipped ability, shield allowance and saved Forge prices.
-export function resourceFact(world) {
+export function resourceFact(world, touch = false) {
   const e = world.econ, level = world.level;
   if (level.total > 0 && level.remaining <= 0) return `${(e.embersCaught | 0) + (e.embersAutoBanked | 0)} embers banked`;
-  if (!level.rules.heat) return 'Embers → Forge';
+  if (!level.rules.heat) return 'Embers buy Forge upgrades';
+  if (world.paddle?.pulling) return 'Pull active · uses HEAT';
+  if (e.ventMs > 0) return 'Cooldown: HEAT paused';
+  if (!(e.heat > 0)) return 'Catch embers to fill HEAT';
   const power = ['', 'Purge', 'Quench', 'Fork'][world.run.overload | 0] || '';
   const shield = !power && e.shieldCost > 0 ? 'Shield' : '';
   const use = power || shield;
-  return level.rules.pull ? use ? `HEAT → Pull / ${use}` : 'HEAT → Pull' : use ? `HEAT → ${use}` : 'Embers → Forge';
+  return level.rules.pull ? touch ? 'Hold 2nd finger for Pull' : 'Hold mouse button for Pull'
+    : use ? `${use} uses HEAT` : 'Embers buy Forge upgrades';
 }
 
 export function forgeProgress(model) {

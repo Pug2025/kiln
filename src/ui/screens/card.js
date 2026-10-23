@@ -8,7 +8,7 @@ import { h, pad2 } from '../dom.js';
 
 export function card(data) {
   const kind = data.kind === 'bonus' ? 'Bonus' : data.kind === 'boss' ? 'Boss' : null;
-  return h('div.card', { 'aria-live': 'polite' },
+  return h(data.controls ? 'div.card.controls' : 'div.card', { 'aria-live': 'polite' },
     h('div.kicker', h('span', data.kicker || `Level ${pad2(data.n)}`), kind ? h('span.tag', kind) : null),
     h('div.title', data.name || ''),
     data.adds ? h('div.adds', h('span', 'Adds'), ` ${data.adds}`) : null,

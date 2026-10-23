@@ -41,7 +41,7 @@ export function results(data, { el, nav, reduceMotion }) {
   const heroValue = (runHero ? data.runScore : data.score) | 0;
   const bonus = data.bonus | 0;
   const stats = [];
-  if (!runHero) stats.push(stat('Run', formatScore(data.runScore | 0)));
+  if (!runHero) stats.push(stat('Run score', formatScore(data.runScore | 0)));
   let bonusStat = null;
   if (bonus > 0) { bonusStat = stat('Clear bonus', `+${formatScore(bonus)}`); stats.push(bonusStat); }
   if (k === 'over' && data.reached) stats.push(stat('Reached', data.reached));
@@ -62,7 +62,7 @@ export function results(data, { el, nav, reduceMotion }) {
   let install = null;
   if (data.install) {
     const ib = button(null, data.install.label || 'Install', () => data.install.onInstall());
-    install = h('div.mapcard.fillcard', h('div.info', h('div.n', 'Install'), h('div.adds', data.install.fact || 'Kiln on the Home Screen, offline.')), ib);
+    install = h('div.mapcard.fillcard', h('div.info', h('div.n', 'Install'), h('div.adds', data.install.fact || 'Add Kiln to your Home Screen.')), ib);
     nav.add(ib, () => data.install.onInstall());
   }
   if (map) nav.add(map, () => data.onMap());
@@ -78,7 +78,7 @@ export function results(data, { el, nav, reduceMotion }) {
 
   el.appendChild(h('div.stack',
     panel(label,
-      data.name || data.flawless ? h('div.sub', [data.name, data.flawless ? 'Flawless' : ''].filter(Boolean).join('  ·  ')) : null,
+      data.name || data.flawless ? h('div.sub', [data.name, data.flawless ? 'No lives lost' : ''].filter(Boolean).join('  ·  ')) : null,
       h('div.hero-wrap', hero),
       h('div.stats', stats),
       rewards,

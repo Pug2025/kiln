@@ -13,12 +13,12 @@ export const BALL_KIND_NAMES = Object.freeze(['Standard', 'Heavy', 'Splitter', '
  * in banked embers; `max` is the top rank.
  */
 export const FORGE_ITEMS = Object.freeze([
-  { id: 'lives', name: 'Start lives', fact: 'Lives at the start of a run', ranks: ['4 lives', '5 lives', '5 lives, 1 free miss per run'], prices: [200, 500, 1000] },
-  { id: 'heat', name: 'HEAT size', fact: 'Size of the HEAT meter', ranks: ['HEAT 120', 'HEAT 140', 'HEAT 160'], prices: [150, 400, 800] },
-  { id: 'paddle', name: 'Paddle width', fact: 'Paddle width at the start', ranks: ['Paddle 130', 'Paddle 140', 'Paddle 150'], prices: [150, 400, 800] },
-  { id: 'embers', name: 'Ember value', fact: 'Embers banked per ember earned', ranks: ['Embers ×1.25', 'Embers ×1.5', 'Embers ×2'], prices: [250, 600, 1200] },
-  { id: 'overload', name: 'Overload power', fact: 'Shorter HEAT vent, stronger Overloads', ranks: ['HEAT vents 10 s, Purge 4 rows, Quench 4 s', 'HEAT vents 8 s, Quench 5 s, Fork ×3', 'HEAT vents 6 s, Purge 5 rows, Quench 6 s'], prices: [200, 500, 1000] },
-  { id: 'ball', name: 'Ball type', fact: 'Ball types to start a run with', ranks: ['Heavy: slower, 2 damage', 'Splitter: splits on a perfect hit', 'Sniper: aim line always on'], prices: [300, 700, 1400] },
+  { id: 'lives', name: 'Start lives', fact: 'More lives at the start of each run', ranks: ['Start with 4 lives', 'Start with 5 lives', '5 lives; first miss costs no life'], prices: [200, 500, 1000] },
+  { id: 'heat', name: 'HEAT size', fact: 'Store more HEAT', ranks: ['Stores up to 120 HEAT', 'Stores up to 140 HEAT', 'Stores up to 160 HEAT'], prices: [150, 400, 800] },
+  { id: 'paddle', name: 'Paddle width', fact: 'Wider starting paddle', ranks: ['Starting width: 120 → 130', 'Starting width: 130 → 140', 'Starting width: 140 → 150'], prices: [150, 400, 800] },
+  { id: 'embers', name: 'Ember value', fact: 'More embers saved for The Forge', ranks: ['Banks 25% more embers', 'Banks 50% more embers', 'Banks twice the embers'], prices: [250, 600, 1200] },
+  { id: 'overload', name: 'Overload power', fact: 'Stronger effects; shorter HEAT cooldown', ranks: ['HEAT paused 10 s; Purge 4 rows; Quench 4 s', 'HEAT paused 8 s; Quench 5 s; Fork: 3 per ball', 'HEAT paused 6 s; Purge 5 rows; Quench 6 s'], prices: [200, 500, 1000] },
+  { id: 'ball', name: 'Ball type', fact: 'Unlock a choice of starting ball', ranks: ['Heavy: 10% slower, 2 damage', 'Splitter: perfect hits add a ball, max 3', 'Sniper: always shows the aim line'], prices: [300, 700, 1400] },
 ].map((it) => Object.freeze({ ...it, max: it.ranks.length, ranks: Object.freeze(it.ranks), prices: Object.freeze(it.prices) })));
 
 export const FORGE_IDS = Object.freeze(FORGE_ITEMS.map((it) => it.id));

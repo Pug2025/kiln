@@ -15,19 +15,19 @@ export function settings(data, { el, nav }) {
   // Sound: all audio on or off, the same switch (and direction) as on the pause panel and the
   // HUD button; the two volumes below it
   const soundSwitch = switchRow(nav, 'Sound', !s.muted, (on) => data.onChange('muted', !on));
-  const music = sliderRow(nav, 'Music', s.music, set('music'));
+  const music = sliderRow(nav, 'Music volume', s.music, set('music'));
   sliders.set(nav.count - 1, music);
-  const effects = sliderRow(nav, 'Effects', s.sfx, set('sfx'));
+  const effects = sliderRow(nav, 'Effects volume', s.sfx, set('sfx'));
   sliders.set(nav.count - 1, effects);
   const rows = [
     soundSwitch,
     music.el,
     effects.el,
-    switchRow(nav, 'Lite', !!s.lite, set('lite')),
+    switchRow(nav, 'Lite graphics', !!s.lite, set('lite')),
     switchRow(nav, 'Reduce motion', !!s.reduceMotion, set('reduceMotion')),
     switchRow(nav, 'Reduce transparency', !!s.reduceTransparency, set('reduceTransparency')),
-    switchRow(nav, 'Thumb pad', !!s.thumbPad, set('thumbPad')),
-    switchRow(nav, 'Left-handed', !!s.leftHanded, set('leftHanded')),
+    switchRow(nav, 'Show action button', !!s.thumbPad, set('thumbPad')),
+    switchRow(nav, 'Left-handed controls', !!s.leftHanded, set('leftHanded')),
     data.fullscreen && data.fullscreen.supported ? switchRow(nav, 'Fullscreen', !!data.fullscreen.on, set('fullscreen')) : null,
   ];
   const more = menu(nav, [{ label: 'Credits', act: () => data.onCredits() }]);

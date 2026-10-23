@@ -89,7 +89,7 @@ export function map(data, { el, nav }) {
     if (id === 'overburn') {
       const o = m.overburn;
       put(info, h('div.n', 'Endless'), h('div.name', 'Overburn'),
-        h('div.adds', o.open ? 'Daily walls. One new rule each wave.' : 'Opens after The Core.'));
+        h('div.adds', o.open ? 'New levels each day. Waves get harder as you play.' : 'Clear The Core to unlock.'));
       put(best, o.bestWave ? h('div.stats', stat('Best wave', String(o.bestWave)), stat('Best', formatScore(o.best))) : null);
       playBtn.textContent = o.open ? 'Play' : 'Locked';
       playBtn.classList.toggle('off', !o.open);

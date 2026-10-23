@@ -130,7 +130,7 @@ const LEVELS = [
     tier: 1,
     gate: true,
     adds: 'Ring field',
-    hint: 'The paddle rides a ring around the core.',
+    hint: 'The paddle moves around the outside of the ring.',
     rows: ringRows((dx, dy, d, a) => {
       if (d < 30) return 'E';
       if (d >= 50 && d < 80) return '4';
@@ -161,7 +161,7 @@ const LEVELS = [
     pick: 'overload',
     gate: true,
     adds: 'Overload pick',
-    hint: 'HEAT fires the Overload. It empties the meter.',
+    hint: 'Choose an Overload. Using it spends all your HEAT.',
     rows: [
       '............',
       'cccccccccccc',
@@ -191,7 +191,7 @@ const LEVELS = [
     pick: 'mod',
     gate: true,
     adds: 'Thru and Mega',
-    hint: 'Thru passes through bricks. Mega comes when five bricks hold out.',
+    hint: 'Thru passes through bricks. Mega drops after 20 s at 5 or fewer left.',
     rows: [
       '............',
       '...aaaaaa...',
@@ -218,7 +218,7 @@ const LEVELS = [
     mode: 'bottom',
     tier: 2,
     adds: 'Scrolling flue',
-    hint: 'The flue is 60 rows deep.',
+    hint: '60 rows. Clearing the bottom lets more rows slide into view.',
     rows: FLUE,
     drops: { rate: 0.03, table: { wide: 2, multi: 2, laser: 2, thru: 1, slow: 1, fast: 1 } },
     rules: { scrollSpeed: 70 },
@@ -234,7 +234,7 @@ const LEVELS = [
     tier: 2,
     gate: true,
     adds: 'Bonus: Fever',
-    hint: 'Every hit splits the ball.',
+    hint: 'Balls split on brick hits, up to 12. Misses cost no lives.',
     rows: [
       '............',
       'cccccccccccc',
@@ -267,7 +267,7 @@ const LEVELS = [
     pick: 'mod',
     gate: true,
     adds: 'Portal pairs',
-    hint: 'A ball entering a ring leaves from its twin.',
+    hint: 'A ball entering a portal exits from the matching letter.',
     rows: [
       '............',
       'b2AA2bb2AA2b',
@@ -295,7 +295,7 @@ const LEVELS = [
     tier: 3,
     gate: true,
     adds: 'Ghost paddles',
-    hint: 'Two ghosts trail the paddle.',
+    hint: 'Two ghost paddles follow you and can return the ball.',
     rows: [
       'c.c.c..c.c.c',
       '.3.3.33.3.3.',
@@ -323,7 +323,7 @@ const LEVELS = [
     tier: 2,
     gate: true,
     adds: 'Lights out',
-    hint: 'Light reaches only the ball and the paddle.',
+    hint: 'Only the area around balls and the paddle stays lit.',
     rows: [
       '3b3b3bb3b3b3',
       'b2b2b2b2b2b2',
@@ -352,8 +352,8 @@ const LEVELS = [
     mode: 'bottom',
     tier: 3,
     pick: 'mod',
-    adds: 'Everything at once',
-    hint: 'A new row every 12 seconds.',
+    adds: 'Moving wall and sentries',
+    hint: 'New rows push the wall down every 12 seconds.',
     rows: [
       '............',
       '.GG......GG.',
@@ -379,7 +379,7 @@ const LEVELS = [
     mode: 'bottom',
     tier: 2,
     adds: 'Final boss: The Core',
-    hint: '3 fields. The armour gaps lead to the core.',
+    hint: 'Three stages: bottom, left, then ring. Gaps expose the core.',
     continues: 'core-2',
     rows: [
       '............',
@@ -419,7 +419,7 @@ const LEVELS = [
     tier: 2,
     stage: 2,
     continues: 'core-3',
-    hint: 'The paddle is on the left. The turning gap leads to the core.',
+    hint: 'The paddle moves on the left. The rotating gap exposes the core.',
     // (kept at x 510: two columns nearer the paddle gave the far wall its full 120, but the
     // perfect robot then won the stage in one stay; the far wall stands 64 past the ring, inside
     // A2's horizontal rule)
@@ -451,7 +451,7 @@ const LEVELS = [
     mode: 'ring',
     tier: 2,
     stage: 3,
-    hint: 'Two rings turn against each other. Their gaps line up.',
+    hint: 'The two rings turn opposite ways. Aligned gaps expose the core.',
     rows: ringRows((dx, dy, d, a) => {
       if (d < 30) return 'W';
       const bottom = near(a, Math.PI / 2, 0.45);

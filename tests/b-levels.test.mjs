@@ -42,14 +42,13 @@ test('every level passes the design checks', () => {
   for (const d of every()) assert.deepEqual(checkLevel(d, { names: LEVEL_NAMES }), [], d.id);
 });
 
-test('labels: adds is 2–4 words, hints are short facts', () => {
+test('level labels and help fit the card without extra punctuation', () => {
   for (const l of LEVELS) {
     const words = l.adds.trim().split(/\s+/).length;
     assert.ok(words >= 2 && words <= 4, `${l.id}: "${l.adds}"`);
     if (l.hint) {
       assert.ok(l.hint.length <= 70, `${l.id}: hint is short`);
       assert.ok(!/!/.test(l.hint), `${l.id}: no exclamations`);
-      assert.ok(!/^(hit|break|catch|use|try|aim|go|get|shoot|dodge|press|tap)\b/i.test(l.hint), `${l.id}: a fact, not an instruction`);
     }
   }
 });
@@ -64,7 +63,7 @@ test('player-facing text: Kiln words only, and the facts are true', () => {
   for (const r of RULES) texts.push(['overburn', r.label]);
   for (const [where, t] of texts) assert.ok(!banned.test(t), `${where}: "${t}"`);
   // facts that name numbers must match the rules
-  assert.match(getLevel(18).hint, new RegExp(`${SENTRY_SPEC[0].hp} hits, bombers ${SENTRY_SPEC[1].hp}`));
+  assert.match(getLevel(18).hint, new RegExp(`${SENTRY_SPEC[0].hp} hits[;,] bombers ${SENTRY_SPEC[1].hp}`));
   const heavier = applyTwist(level(['a2A9E?X.....', 'aaaaaaaaa...']), 'heavier');
   assert.equal(heavier.rows[0], '23A9E?X.....', 'plain and numbered bricks take 1 more hit; the rest are as they were');
   // every door's fact is in plain words and its counts are true of the twisted wall

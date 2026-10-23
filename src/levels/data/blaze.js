@@ -55,7 +55,7 @@ const LEVELS = [
     mode: 'bottom',
     tier: 1,
     adds: 'Sealed balls',
-    hint: 'A freed ball doubles the level score.',
+    hint: 'Opening a shell frees an extra ball and doubles the level score.',
     rows: [
       '.....bb.....',
       '....bbbb....',
@@ -84,7 +84,7 @@ const LEVELS = [
     pick: 'mod',
     gate: true,
     adds: 'Mod pick',
-    hint: 'One Mod of 3, kept for the run.',
+    hint: 'Choose 1 of 3 Mods. It lasts for this run.',
     rows: [
       '....cccc....',
       '....cAAc....',
@@ -110,7 +110,7 @@ const LEVELS = [
     mode: 'bottom',
     tier: 1,
     adds: 'Marching wall',
-    hint: 'A new row every 15 seconds.',
+    hint: 'A new row pushes the wall down every 15 seconds.',
     rows: [
       '.aaaaaaaaaa.',
       '.bbb2bb2bbb.',
@@ -136,7 +136,7 @@ const LEVELS = [
     tier: 1,
     gate: true,
     adds: 'Bonus: multiball rain',
-    hint: 'A new ball falls every 1.5 seconds.',
+    hint: 'A new ball falls every 1.5 seconds. Misses cost no lives.',
     rows: [
       '222222222222',
       '2a2a2a2a2a2a',
@@ -163,7 +163,7 @@ const LEVELS = [
     pick: 'mod',
     gate: true,
     adds: 'Gravity bricks',
-    hint: 'Clamped bricks fall when the brick under them goes.',
+    hint: 'Clamped bricks fall when their support breaks.',
     rows: [
       '............',
       'GG........GG',
@@ -192,7 +192,7 @@ const LEVELS = [
     tier: 1,
     gate: true,
     adds: 'Horizontal field',
-    hint: 'The paddle rides the left edge.',
+    hint: 'The paddle moves up and down the left edge.',
     // (two columns nearer the paddle than at first: the far deck ends at x 630, leaving 90 units
     // between it and the far wall for A2's ceiling rule)
     rows: leftRows((r, c) => {
@@ -220,7 +220,7 @@ const LEVELS = [
     tier: 2,
     gate: true,
     adds: 'Sentry drones',
-    hint: 'Sentries take 2 hits, bombers 3; a laser or a perfect hit kills one.',
+    hint: 'Sentries take 2 hits; bombers 3. Lasers or perfect hits kill either.',
     rows: [
       '...bbccbb...',
       '..2bbccbb2..',
@@ -250,7 +250,7 @@ const LEVELS = [
     tier: 2,
     pick: 'mod',
     adds: 'Moving explosives, sentries',
-    hint: 'Blasts kill sentries.',
+    hint: 'Explosions destroy sentries.',
     rows: [
       '.a2a2aa2a2a.',
       '3c3c3cc3c3c3',

@@ -31,7 +31,7 @@ export function forge(data, { el, nav }) {
   if (ball && ball.kinds && ball.kinds.length > 1) {
     let idx = Math.max(0, ball.kinds.findIndex((k) => k.id === ball.current));
     const value = h('span.detail', ball.kinds[idx].name);
-    ballRow = h('button.row', { type: 'button' }, h('span.label', 'Ball'), value, h('span.arrow', { 'aria-hidden': 'true' }, '›'));
+    ballRow = h('button.row', { type: 'button' }, h('span.label', 'Starting ball'), value, h('span.arrow', { 'aria-hidden': 'true' }, '›'));
     nav.add(ballRow, () => {
       idx = (idx + 1) % ball.kinds.length;
       value.textContent = ball.kinds[idx].name;
@@ -57,7 +57,7 @@ export function forge(data, { el, nav }) {
   }
   paint();
   el.appendChild(h('div.stack.wide', panel('The Forge',
-    h('div.sub', 'Permanent ember currency. Upgrades apply to your next run.'),
+    h('div.sub', 'Spend embers on permanent upgrades. They apply from your next run.'),
     h('div.stats', balance),
     h('div.scroll', rows.map((r) => r.el)),
     ballRow ? h('div.menu', ballRow) : null,

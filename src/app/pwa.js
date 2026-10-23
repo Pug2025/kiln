@@ -36,7 +36,7 @@ export function initPwa(opts) {
   try {
     if (sessionStorage.getItem(UPDATED_KEY)) {
       sessionStorage.removeItem(UPDATED_KEY);
-      setTimeout(() => opts.toast('Updated'), 900);
+      setTimeout(() => opts.toast('Kiln updated'), 900);
     }
   } catch { /* storage blocked */ }
 
@@ -86,7 +86,7 @@ export function initPwa(opts) {
       return deferred !== null;
     },
     prompt() {
-      if (!deferred) { opts.toast('Share, then Add to Home Screen'); return; }
+      if (!deferred) { opts.toast('Open Share, then choose Add to Home Screen.'); return; }
       const e = deferred;
       deferred = null;
       e.prompt();

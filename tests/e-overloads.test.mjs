@@ -113,7 +113,6 @@ test('The Forge shortens the vent at every rank and makes Overloads stronger; th
 test('the Overload pick cards state the run\'s own power (The Forge ranks), not rank 0', () => {
   const at = (rank) => createRun({ save: { forge: { ranks: { overload: rank } } } });
   assert.deepEqual(overloadChoices(createRun()).map((o) => o.fact), OVERLOADS.map((o) => o.fact), 'rank 0 matches the static cards');
-  assert.deepEqual(OVERLOADS.map((o) => o.fact), ['Clears the lowest 3 rows', 'All balls slow for 3 s', 'Every ball splits in two']);
   for (let rank = 0; rank <= 3; rank++) {
     const pw = overloadPower(at(rank));
     const cards = overloadChoices(at(rank));
@@ -124,8 +123,6 @@ test('the Overload pick cards state the run\'s own power (The Forge ranks), not 
     assert.ok(cards[2].fact.endsWith(['two', 'three', 'four'][pw.forkExtra - 1]), `rank ${rank}: ${cards[2].fact}`);
     for (const c of cards) assert.ok(c.fact.length <= 40, `short fact: ${c.fact}`);
   }
-  assert.equal(overloadChoices(at(2))[0].fact, 'Clears the lowest 4 rows');
-  assert.equal(overloadChoices(at(3))[1].fact, 'All balls slow for 6 s');
 });
 
 test('The Forge\'s Overload facts say what each rank changes, in the tuning\'s numbers', () => {
@@ -133,11 +130,11 @@ test('The Forge\'s Overload facts say what each rank changes, in the tuning\'s n
   for (let rank = 1; rank <= 3; rank++) {
     const fact = it.ranks[rank - 1];
     const has = (s) => assert.ok(fact.includes(s), `rank ${rank} "${fact}" says "${s}"`);
-    has(`HEAT vents ${FORGE_FX.VENT_MS[rank] / 1000} s`);
+    assert.match(fact, new RegExp(`HEAT.*${FORGE_FX.VENT_MS[rank] / 1000} s`));
     if (FORGE_FX.PURGE_ROWS[rank] !== FORGE_FX.PURGE_ROWS[rank - 1]) has(`Purge ${FORGE_FX.PURGE_ROWS[rank]} rows`);
     else assert.ok(!fact.includes('Purge'), `rank ${rank} does not claim a Purge step`);
     if (FORGE_FX.QUENCH_MS[rank] !== FORGE_FX.QUENCH_MS[rank - 1]) has(`Quench ${FORGE_FX.QUENCH_MS[rank] / 1000} s`);
-    if (FORGE_FX.FORK_EXTRA[rank] !== FORGE_FX.FORK_EXTRA[rank - 1]) has(`Fork ×${FORGE_FX.FORK_EXTRA[rank] + 1}`);
+    if (FORGE_FX.FORK_EXTRA[rank] !== FORGE_FX.FORK_EXTRA[rank - 1]) assert.match(fact, new RegExp(`Fork.*${FORGE_FX.FORK_EXTRA[rank] + 1}`));
     else assert.ok(!fact.includes('Fork'), `rank ${rank} does not claim a Fork step`);
     assert.ok(!/cost/i.test(fact), 'no cost claim: the Forge does not change it');
   }

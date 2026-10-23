@@ -19,7 +19,7 @@ const LEVELS = [
     mode: 'bottom',
     tier: 0,
     adds: 'Embers and Wide',
-    hint: 'Embers buy Forge upgrades. Wide drops widen the paddle.',
+    hint: 'Embers buy Forge upgrades. Wide makes the paddle wider.',
     rows: [
       '...aaaaaa...',
       '....bbbb....',
@@ -41,7 +41,7 @@ const LEVELS = [
     mode: 'bottom',
     tier: 0,
     adds: 'Numbered bricks and Multi',
-    hint: 'Numbers show hits left. Multi drops split the ball.',
+    hint: 'Numbers or dots show hits left. Multi makes three balls.',
     rows: [
       '.....22.....',
       '....acca....',
@@ -62,8 +62,8 @@ const LEVELS = [
     kind: 'normal',
     mode: 'bottom',
     tier: 0,
-    adds: 'Good drops',
-    hint: 'Marked drops grant powers. Small embers buy Forge upgrades.',
+    adds: 'Power drops',
+    hint: 'Marked drops give powers. Small embers buy Forge upgrades.',
     rows: [
       'cccccccccccc',
       'aaaaaaaaaaaa',
@@ -90,7 +90,7 @@ const LEVELS = [
     mode: 'bottom',
     tier: 0,
     adds: 'Indestructible bricks',
-    hint: 'Black bricks never break.',
+    hint: 'Locked black bricks cannot break.',
     rows: [
       '....bccb....',
       '...XbccbX...',
@@ -115,7 +115,7 @@ const LEVELS = [
     mode: 'bottom',
     tier: 1,
     adds: 'Bonus: 30 seconds',
-    hint: 'No ball is lost here.',
+    hint: 'Misses cost no lives.',
     rows: [
       'c...c..ccccc',
       'c..c.....c..',
@@ -147,7 +147,7 @@ const LEVELS = [
     mode: 'bottom',
     tier: 0,
     adds: 'Explosives and Fire',
-    hint: 'A blast breaks the 3 x 3 around it.',
+    hint: 'Explosive bricks break the surrounding 3 × 3 area.',
     rows: [
       'cccc....cccc',
       '2222.22.2222',
@@ -174,7 +174,7 @@ const LEVELS = [
     mode: 'bottom',
     tier: 0,
     adds: 'Pull and HEAT',
-    hint: 'HEAT fuels Pull. 100 HEAT buys one Shield per level.',
+    hint: 'Pull draws balls toward the paddle and uses HEAT.',
     rows: [
       'cc........cc',
       'c..........c',
@@ -200,7 +200,7 @@ const LEVELS = [
     mode: 'bottom',
     tier: 1,
     adds: 'Bad drops and Catch',
-    hint: 'Red glyphs are bad drops.',
+    hint: 'Red drops shrink the paddle, speed up balls or dim the field.',
     rows: [
       '....cccc....',
       '...b.cc.b...',
@@ -229,7 +229,7 @@ const LEVELS = [
     mode: 'bottom',
     tier: 1,
     adds: 'Moving rows',
-    hint: 'Two rows loop around the field.',
+    hint: 'Two rows wrap from one side of the field to the other.',
     rows: [
       '.....22.....',
       '....aaaa....',

@@ -125,6 +125,11 @@
 .scroll { overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; touch-action: pan-y; max-height: min(56dvh, 520px); }
 .scroll::-webkit-scrollbar { width: 0; height: 0; }
 
+/* Settings stay readable and tappable inside the scrolling list on small phones. */
+.screen-settings .row { height: auto; min-height: 44px; flex-shrink: 0; }
+.screen-settings .row .label { white-space: normal; overflow: visible; text-overflow: clip; line-height: 1.2; }
+.screen-settings .row.slider .label { flex: 0 0 85px; }
+
 /* key chips (R17) */
 .keys { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; font: 400 12px/1 var(--font-body); letter-spacing: .06em; color: var(--w50); }
 .keys span { display: inline-flex; align-items: center; gap: 6px; }
@@ -165,6 +170,8 @@ kbd {
 .card .adds { margin-top: 10px; font: 400 16px/1.35 var(--font-body); color: var(--w70); }
 .card .adds span { font: 500 12px/1 var(--font-body); letter-spacing: .25em; text-transform: uppercase; color: var(--w55); margin-right: 6px; }
 .card .sub { padding: 0; margin-top: 8px; font: 400 14px/1.4 var(--font-body); color: var(--w50); }
+.card.controls .sub { color: var(--text); }
+.card.controls .title { font-size: 24px; }
 
 /* title */
 .screen-title { justify-content: flex-start; }

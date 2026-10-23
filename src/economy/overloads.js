@@ -10,9 +10,9 @@ const SPLIT_WORDS = ['', 'two', 'three', 'four'];
 
 /** One short line for an Overload's pick card at a given power (overloadPower). */
 function factFor(id, pw) {
-  if (id === OVERLOAD.PURGE) return `Clears the lowest ${pw.purgeRows} rows`;
-  if (id === OVERLOAD.QUENCH) return `All balls slow for ${pw.quenchMs / 1000} s`;
-  return `Every ball splits in ${SPLIT_WORDS[pw.forkExtra] || pw.forkExtra + 1}`; // splitBalls(n): n + 1 balls
+  if (id === OVERLOAD.PURGE) return `Clears ${pw.purgeRows} rows nearest the paddle`;
+  if (id === OVERLOAD.QUENCH) return `All balls at half speed for ${pw.quenchMs / 1000} s`;
+  return `Splits each ball into ${SPLIT_WORDS[pw.forkExtra] || pw.forkExtra + 1}`; // splitBalls(n): n + 1 balls
 }
 
 const RANK0 = Object.freeze({

@@ -125,14 +125,19 @@ export function createActors(scene, M) {
 
   // ---------------------------------------------------------------- balls
   const ballGeo = new THREE.SphereGeometry(BALL.R, 28, 20);
-  const ballMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(1, 0.97, 0.92).multiplyScalar(LOOK.BALL_GAIN) });
+  // The simulated ball stays readable in front of glass and Fog. It is an opaque-looking
+  // emitter in the final transparent pass, so scenery never hides its collision position.
+  const ballMat = new THREE.MeshBasicMaterial({
+    color: new THREE.Color(1, 0.97, 0.92).multiplyScalar(LOOK.BALL_GAIN),
+    transparent: true, depthTest: false, depthWrite: false,
+  });
   const balls = new THREE.InstancedMesh(ballGeo, ballMat, BALL.MAX);
   balls.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   balls.frustumCulled = false;
   balls.count = 0;
-  balls.renderOrder = 7;
+  balls.renderOrder = 21;
   const haloMat = new THREE.MeshBasicMaterial({
-    map: M.tex.glow, color: PAL.heatHi.clone(), transparent: true, opacity: 0.8,
+    map: M.tex.glow, color: PAL.heatHi.clone(), transparent: true, opacity: LOOK.BALL_HALO_ALPHA,
     blending: THREE.AdditiveBlending, depthWrite: false,
   });
   const halos = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), haloMat, BALL.MAX);
@@ -174,9 +179,9 @@ export function createActors(scene, M) {
   const padTitanium = M.titanium.clone();
   padTitanium.envMapIntensity = 3.4;
   padTitanium.roughness = 0.3;
-  // self-light 0x4e5258 (was 0x2a2e35; G's legibility run 2026-10-22: the paddle's mean 0.12 to 0.15
-  // needed 0.19 to 0.25 against a ring lit by the fire under the lip at x5 and in flares)
-  padTitanium.emissive = new THREE.Color(0x4e5258);
+  // A cool titanium self-light preserves the brushed surface through White Heat and flares,
+  // without changing any light, fire, exposure or background material.
+  padTitanium.emissive = new THREE.Color(LOOK.PADDLE_SELF_LIGHT);
   padTitanium.emissiveIntensity = 1;
 
   // bar (bottom and left modes)

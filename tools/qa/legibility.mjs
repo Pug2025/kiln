@@ -45,7 +45,7 @@ function parseArgs(argv) {
     devices: ['iphone14pro', 'desktop'], levels: [1, 11, 23], lite: 'off', min: 3, metric: 'wcag', ring: 40, seed: 1, params: '',
     url: '', root: resolve(HERE, '..', '..'), shots: false, out: '', json: '', headed: false,
     gap: 2, insetPx: 1, gapPx: 1, insetUnits: 1.5,
-    ballClear: 32, // field units around a ball (its halo is 62 wide) left out of the paddle's ring
+    ballClear: 32, // field units around a ball (its halo is 40 wide) left out of the paddle's ring
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];

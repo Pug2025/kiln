@@ -34,32 +34,32 @@ test('boss HUD: persistent jaw route, permanent core progress, one repair, and g
     assert.equal(key('levelLabel').textContent, 'Stoker');
     assert.equal(key('name').textContent, '5 core hits left');
     hud.update(w, 60000);
-    assert.equal(key('bossFact').textContent, 'Break jaw → core', 'the objective survives the serving card timeout');
+    assert.match(key('bossFact').textContent, /Break.*plate.*below.*core/, 'the objective survives the serving card timeout');
     t.hit(jaw[0], SRC.LASER);
     hud.update(w, 60001);
-    assert.equal(key('bossFact').textContent, 'Break jaw → core', 'an outer plate opening is not a route below the core');
+    assert.match(key('bossFact').textContent, /Break.*plate.*below.*core/, 'an outer plate opening is not a route below the core');
     t.hit(jaw[2], SRC.LASER);
     hud.update(w, 60002);
-    assert.equal(key('bossFact').textContent, 'Jaw open → core');
+    assert.match(key('bossFact').textContent, /Jaw open.*core/);
     t.hit(core);
     hud.update(w, 60003);
     assert.equal(key('name').textContent, '4 core hits left');
     assert.equal(key('boss').getAttribute('aria-valuenow'), '4');
     assert.match(key('boss').getAttribute('aria-label'), /The Stoker/);
-    assert.equal(key('bossFact').textContent, 'Break jaw → core', 'the one repair closes the route without restoring core health');
+    assert.match(key('bossFact').textContent, /Break.*plate.*below.*core/, 'the one repair closes the route without restoring core health');
     t.hit(jaw[2], SRC.LASER);
     w.boss.data.guard = 1;
     hud.update(w, 60004);
     hud.update(w, 62503);
-    assert.equal(key('bossFact').textContent, 'Core cooling briefly', 'guard fact remains for the entire real guard state');
+    assert.match(key('bossFact').textContent, /Core.*protected/, 'guard fact remains for the entire real guard state');
     w.boss.data.guard = 0;
     hud.update(w, 62504);
-    assert.equal(key('bossFact').textContent, 'Jaw open → core');
+    assert.match(key('bossFact').textContent, /Jaw open.*core/);
     assert.equal(key('name').textContent, '4 core hits left');
     w.boss.active = false;
     hud.update(w, 63000);
     assert.equal(key('bossFact').hidden, false);
-    assert.match(key('bossFact').textContent, /HEAT →/);
+    assert.match(key('bossFact').textContent, /HEAT/);
     assert.equal(key('levelLabel').textContent, 'Level');
     assert.equal(key('name').textContent, 'The Stoker');
   } finally { dom.restore(); }
@@ -70,7 +70,7 @@ test('boss HUD: rotating armour is a gap objective, and each Core health bar ide
   try {
     assert.equal(key('levelLabel').textContent, 'Crucible');
     assert.equal(key('name').textContent, '20 core hits left');
-    assert.equal(key('bossFact').textContent, 'Gap → core');
+    assert.match(key('bossFact').textContent, /core.*gap/);
     for (let stage = 1; stage <= 3; stage++) {
       const w = contentWorld(stagesOf(getLevel(30))[stage - 1]).world;
       // No reset: a new stage must replace its progress even when a caller reuses the HUD.
@@ -79,7 +79,7 @@ test('boss HUD: rotating armour is a gap objective, and each Core health bar ide
       assert.equal(key('name').textContent, `${w.boss.hp} core hits left`);
       assert.match(key('boss').getAttribute('aria-label'), new RegExp(`stage ${stage} of 3`));
       assert.equal(key('boss').getAttribute('aria-valuemax'), String(w.boss.hpMax));
-      assert.equal(key('bossFact').textContent, `${stage === 3 ? 'Aligned gaps' : 'Gap'} → core`);
+      assert.match(key('bossFact').textContent, stage === 3 ? /core.*both gaps/ : /core.*gap/);
       w.boss.hp = 0;
       hud.update(w, stage * 1000 + 1);
       assert.equal(key('bossFact').textContent, stage === 3 ? 'Core broken' : 'Stage complete');

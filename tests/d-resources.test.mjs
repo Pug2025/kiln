@@ -12,16 +12,27 @@ import { defaultSave } from '../src/economy/save.js';
 import { createRun } from '../src/economy/economy.js';
 import { bankRun, emberValue } from '../src/economy/forge.js';
 
-test('resource fact names available HEAT uses and the real equipped Overload; win names banked count', () => {
+test('resource facts explain earning HEAT, the input for Pull, active spending and cooldown', () => {
   const w = createWorld({ level: getLevel(1), systems: makeSystems() });
-  assert.equal(resourceFact(w), 'Embers → Forge');
+  assert.match(resourceFact(w), /Embers.*Forge/);
   const heat = createWorld({ level: getLevel(7), systems: makeSystems() });
-  assert.equal(resourceFact(heat), 'HEAT → Pull / Shield');
+  assert.match(resourceFact(heat), /Catch embers.*HEAT/);
+  heat.econ.heat = 40;
+  assert.match(resourceFact(heat, true), /Hold.*finger.*Pull/);
+  assert.match(resourceFact(heat, false), /Hold.*mouse.*Pull/);
+  heat.paddle.pulling = true;
+  assert.match(resourceFact(heat), /Pull active.*HEAT/);
+  heat.paddle.pulling = false;
+  heat.econ.ventMs = 1000;
+  assert.match(resourceFact(heat), /Cooldown.*HEAT/);
+  heat.econ.ventMs = 0;
+  heat.level.rules.pull = false;
+  assert.match(resourceFact(heat), /Shield.*HEAT/);
   heat.econ.shieldCost = 0;
-  assert.equal(resourceFact(heat), 'HEAT → Pull', 'a shield already bought cannot be advertised again');
+  assert.doesNotMatch(resourceFact(heat), /Shield/, 'a spent shield allowance is not advertised again');
   for (const [id, name] of [[1, 'Purge'], [2, 'Quench'], [3, 'Fork']]) {
     heat.run.overload = id;
-    assert.equal(resourceFact(heat), `HEAT → Pull / ${name}`);
+    assert.match(resourceFact(heat), new RegExp(`${name}.*HEAT`));
   }
   heat.level.remaining = 0; heat.econ.embersCaught = 12; heat.econ.embersAutoBanked = 7;
   assert.equal(resourceFact(heat), '19 embers banked');
@@ -34,7 +45,7 @@ test('HUD keeps the resource fact until an opening power explanation occupies it
     const key = name => hud.el.querySelectorAll('[data-k]').find(n => n.dataset.k === name);
     hud.update(w, 0);
     assert.equal(key('bossFact').hidden, false);
-    assert.equal(key('bossFact').textContent, 'Embers → Forge');
+    assert.match(key('bossFact').textContent, /Embers.*Forge/);
     hud.openingDrop(DROP.WIDE, false, 0, 10); hud.update(w, 10);
     assert.equal(key('bossFact').hidden, true);
     assert.equal(key('dropFact').hidden, false);
@@ -43,6 +54,23 @@ test('HUD keeps the resource fact until an opening power explanation occupies it
     assert.equal(key('dropFact').hidden, true);
     w.level.remaining = 0; w.econ.embersAutoBanked = 21; hud.update(w, 4000);
     assert.equal(key('bossFact').textContent, '21 embers banked');
+  } finally { dom.restore(); }
+});
+
+test('HUD confirms Pull is active without replacing the boss route, then restores the HEAT label', () => {
+  const dom = installTreeDom();
+  try {
+    const hud = createHud(dom.root), w = createWorld({ level: getLevel(10), systems: makeSystems() });
+    const key = name => hud.el.querySelectorAll('[data-k]').find(n => n.dataset.k === name);
+    hud.update(w, 0);
+    const route = key('bossFact').textContent;
+    assert.equal(key('heatLabel').textContent, 'Heat');
+    w.paddle.pulling = true; hud.update(w, 100);
+    assert.equal(key('heatLabel').textContent, 'Pull');
+    assert.match(key('heatRow').getAttribute('aria-label'), /Pull active.*HEAT/);
+    assert.equal(key('bossFact').textContent, route, 'the boss objective remains visible while Pull is used');
+    w.paddle.pulling = false; hud.update(w, 200);
+    assert.equal(key('heatLabel').textContent, 'Heat');
   } finally { dom.restore(); }
 });
 

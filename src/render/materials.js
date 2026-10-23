@@ -181,10 +181,13 @@ const HEAT_GLSL = `
   vec3 hot = mix(uHeatLo, uHeatHi, smoothstep(0.55, 1.4, h) * (0.35 + 0.65 * centre));
   float body = pow(min(h, 1.0), 2.0) * (0.35 + 0.95 * centre);
   float lines = min(h, 1.2) * 0.9 * crack * (0.5 + 0.5 * centre);
-  totalEmissiveRadiance += hot * (body + lines) + vec3(1.0, 0.95, 0.85) * max(h - 1.0, 0.0) * 1.8;
+  // A hit whitens the contained centre, not the complete slab. A uniform white flash
+  // flooded the ball's surroundings with bloom even while its core stayed clearly drawn.
+  float whiteCore = centre * centre * centre * centre;
+  totalEmissiveRadiance += hot * (body + lines) + vec3(1.0, 0.95, 0.85) * max(h - 1.0, 0.0) * 1.8 * whiteCore;
   // molten (heat 1, tier 3; explosive peaks; weak points): a white-hot centre that crosses the bloom
   // threshold through the shell (ART 7 lists molten cores as bloom sources; C call, review 2026-10-22)
-  totalEmissiveRadiance += vec3(1.0, 0.9, 0.72) * smoothstep(0.9, 1.0, h) * centre * centre * 1.25;
+  totalEmissiveRadiance += vec3(1.0, 0.9, 0.72) * smoothstep(0.9, 1.0, h) * whiteCore * 1.25;
   diffuseColor.rgb *= 1.0 - 0.45 * min(h, 1.0);`;
 
 /**

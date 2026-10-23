@@ -356,7 +356,7 @@ function buildWave(rng, wave) {
     kind: 'normal',
     mode,
     tier: P.tier,
-    adds: fresh ? RULES[wave - 1].label : 'Hotter',
+    adds: fresh ? RULES[wave - 1].label : 'Harder wall',
     rows: mode === 'left' ? leftWall(rng, wave) : mode === 'ring' ? ringWall(rng, wave, sentries) : fixTraps(bottomWall(rng, wave)),
     drops: { rate: has(wave, 'drops') ? DROPS.rate : 0, table: dropTable(mode) },
     rules: { pull: true, overloads: true },

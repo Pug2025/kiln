@@ -36,7 +36,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // that count as shown: the gate's two doors are drawn by the pick screen.
 const SCREENS = [
   { name: 'pause', call: "pause('qa')" },
-  { name: 'title' }, { name: 'map' }, { name: 'forge' }, { name: 'settings' }, { name: 'credits' },
+  { name: 'title' }, { name: 'map' }, { name: 'forge' }, { name: 'settings' }, { name: 'guide' }, { name: 'credits' },
   { name: 'results', call: 'showResults()' },
   { name: 'results-over', call: "showResults('over')", expect: ['results'] },
   { name: 'pick', call: 'showPick()' },

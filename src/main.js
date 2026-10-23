@@ -19,6 +19,7 @@
 
 import { SIM } from './core/constants.js';
 import { forgeProgress, bankStageRewards } from './ui/resources.js';
+import { controlHints } from './ui/play-help.js';
 import { createWorld, stepWorld } from './core/world.js';
 import { createInputFrame, clearEdges } from './core/input-frame.js';
 import { dailySeed } from './core/rng.js';
@@ -227,7 +228,7 @@ async function boot() {
   function liteToast() {
     if (!app.liteNote) return;
     app.liteNote = false;
-    ui.toast('Lite mode on');
+    ui.toast('Lite graphics on');
   }
 
   function command(name) {
@@ -343,25 +344,23 @@ async function boot() {
   }
 
   function showCard(def) {
-    const controls = [];
     const touch = coarse.matches;
-    if (!seen.launch) { controls.push(touch ? 'Steer: drag low on the screen. Launch: tap.' : 'Steer: mouse or arrows. Launch: click or Space.'); seen.launch = true; }
-    const rules = def.rules || {};
-    if (rules.pull && !seen.pull) { controls.push(touch ? 'Pull: hold a second finger.' : 'Pull: hold a mouse button or Shift.'); seen.pull = true; }
-    if (rules.heat && !seen.shield) { controls.push(touch ? 'Round button: a shield for HEAT.' : 'Q: a shield for HEAT.'); seen.shield = true; }
-    if (rules.overloads && !seen.overload) { controls.push(touch ? 'Round button: the Overload.' : 'Q or E: the Overload.'); seen.overload = true; }
+    const rules = app.world?.level.rules || def.rules || {};
+    const controls = controlHints(rules, seen, touch);
     if (controls.length) writeSeen(seen);
     ui.card({
       n: def.n > 30 ? app.wave : def.n,
       kicker: def.world === 'overburn' ? 'Overburn' : def.stage > 1 ? `Level ${String(def.n).padStart(2, '0')}  ·  Stage ${def.stage}` : '',
       name: def.world === 'overburn' ? `Wave ${app.wave}` : def.name,
       kind: def.kind || kindOf(def.n),
-      adds: def.adds || '',
+      adds: controls.length ? '' : def.adds || '',
       door: def.twist ? app.door || '' : '',
-      hint: [def.hint, ...controls].filter(Boolean).join('  '),
+      hint: controls.length ? controls.join('  ') : def.hint,
+      controls: controls.length > 0,
       bands: app.world ? cardBands(app.world) : null,
     });
-    app.cardUntil = performance.now() + CARD_MS + (controls.length ? 1800 : 0);
+    // New controls can be read at the player's pace; launching still clears the card immediately.
+    app.cardUntil = controls.length ? Infinity : performance.now() + CARD_MS;
   }
 
   // ------------------------------------------------------------------ menus
@@ -413,14 +412,14 @@ async function boot() {
       overburnOpen(c) ? { id: 'overburn', label: 'OVERBURN' } : null,
       { id: 'forge', label: 'THE FORGE' },
       { id: 'settings', label: 'SETTINGS' },
-      { id: 'guide', label: 'HOW IT WORKS' },
+      { id: 'guide', label: 'HOW TO PLAY' },
     ].filter(Boolean);
     const cleared = Object.keys(c.cleared).filter((k) => c.cleared[k] && Number(k) <= 30).length;
     const forged = Object.values(data.forge.ranks || {}).reduce((a, v) => a + (v | 0), 0);
     const stats = [];
     if (cleared) stats.push({ label: 'Cleared', value: `${cleared}/30` });
     if (data.forge.embers) stats.push({ label: 'Embers', value: formatScore(data.forge.embers) });
-    if (forged) stats.push({ label: 'Forged', value: String(forged) });
+    if (forged) stats.push({ label: 'Upgrades', value: String(forged) });
     if (data.overburn.bestWave) stats.push({ label: 'Overburn', value: `Wave ${data.overburn.bestWave}` });
     const world = worldOf(n);
     ui.show('title', {
@@ -497,8 +496,10 @@ async function boot() {
 
   /** The pick screen's words and options for a Mod, Overload or gate pick before level `def`. */
   function pickData(kind, def, run) {
-    if (kind === 'mod') return { kind, options: ext.modChoices(run, def.n), kicker: 'Mod  ·  Pick one', sub: 'Lasts the run.', confirm: 'Take' };
-    if (kind === 'overload') return { kind, options: ext.overloadChoices(run), kicker: 'Overload  ·  Pick one', sub: 'Fired from HEAT. Lasts the run.', confirm: 'Take' };
+    if (kind === 'mod') return { kind, options: ext.modChoices(run, def.n), kicker: 'Choose a Mod', sub: 'Applies for the rest of this run.', confirm: 'Choose' };
+    if (kind === 'overload') return { kind, options: ext.overloadChoices(run).map((o) => ({ ...o,
+      tag: o.raw?.cost > 0 ? `Ready at ${o.raw.cost} HEAT` : '',
+    })), kicker: 'Choose an Overload', sub: 'Replaces the Shield button. Firing empties HEAT.', confirm: 'Choose' };
     return {
       kind, options: ext.twistsFor(def.n), kicker: `Next  ·  ${String(def.n).padStart(2, '0')} ${def.name}`,
       sub: def.adds ? `Adds ${def.adds}.` : '', confirm: 'Enter',
@@ -743,8 +744,8 @@ async function boot() {
       localStorage.setItem(INSTALL_KEY, today);
     } catch { /* no storage: once per session */ }
     return {
-      label: pwa.canPrompt() ? 'Install' : 'How',
-      fact: pwa.canPrompt() ? 'Kiln on the Home Screen, offline.' : 'Share, then Add to Home Screen.',
+      label: pwa.canPrompt() ? 'Install Kiln' : 'Add to Home Screen',
+      fact: pwa.canPrompt() ? 'Add Kiln to your Home Screen for offline play.' : 'In Safari, open Share and choose Add to Home Screen.',
       onInstall: () => pwa.prompt(),
     };
   }
@@ -921,5 +922,5 @@ async function boot() {
 
 boot().catch((err) => {
   console.error('[kiln] boot failed', err);
-  uiRoot.innerHTML = '<div class="boot">Kiln could not start on this browser.</div>';
+  uiRoot.innerHTML = '<div class="boot">Kiln could not load. Refresh the page to try again.</div>';
 });
