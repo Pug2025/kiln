@@ -92,7 +92,7 @@ test('guide is an accessible scroll region with the real resource/desktop/phone 
   } finally { dom.restore(); }
 });
 
-test('results distinguish actual catches, automatic raw embers, converted Forge gain and wallet', () => {
+test('results show ember totals, converted Forge gain and wallet without a collection breakdown', () => {
   for (const kind of ['cleared', 'wave', 'campaign', 'over']) {
     const dom = installTreeDom();
     try {
@@ -100,7 +100,8 @@ test('results distinguish actual catches, automatic raw embers, converted Forge 
         rewards: { caught: 5, auto: 9, forgeGain: 21, wallet: 121, nextName: 'Paddle', nextPrice: 180 }, onNext() {} },
       { el: dom.root, nav: { count: 0, add() { this.count++; } }, reduceMotion: () => true });
       const summary = dom.root.querySelector('.resource-summary').textContent;
-      assert.match(summary, /5 caught · 9 auto-banked/);
+      assert.doesNotMatch(summary, /caught|auto-banked/);
+      assert.match(dom.root.textContent, /14/);
       assert.match(summary, /Forge wallet 121 · \+21/);
       assert.match(summary, /59 more for Paddle/);
       api.dispose();

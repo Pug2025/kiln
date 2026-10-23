@@ -61,7 +61,7 @@ try{
     await page.eval('window.RQ.flow()');const expected=before.wallet+Math.floor(before.raw*1.25);
     assert.equal(await page.eval('window.__kiln.data.forge.embers'),expected,'Forge gain conversion');assert.equal(await page.eval('window.__kiln.save.load().forge.embers'),expected,'saved wallet');
     if(level===30&&stage<3){assert.equal(await page.eval('window.__kiln.world.level.def.stage'),stage+1);assert.ok(!await page.eval('window.__kiln.data.campaign.cleared[30]'),'stage must not record campaign clear');}
-    else{await waitUI('results');const s=await shot(`L${level}-results`);assert.match(s.text,/auto-banked/);assert.match(s.text,/Forge wallet/);const wallet=s.wallet;await page.eval('window.__kiln.advance(50,100)');assert.equal(await page.eval('window.__kiln.save.load().forge.embers'),wallet,'no repeat banking');if(level===30){assert.match(s.text,/This encounter/);assert.ok(await page.eval('window.__kiln.data.campaign.cleared[30]'));}}
+    else{await waitUI('results');const s=await shot(`L${level}-results`);assert.doesNotMatch(s.text,/auto-banked|caught/);assert.match(s.text,/Forge wallet/);const wallet=s.wallet;await page.eval('window.__kiln.advance(50,100)');assert.equal(await page.eval('window.__kiln.save.load().forge.embers'),wallet,'no repeat banking');if(level===30){assert.ok(await page.eval('window.__kiln.data.campaign.cleared[30]'));}}
    }
   }
   await page.send('Target.closeTarget',{targetId:page.targetId});console.log(`${device}: guide, pause, HUD, win settlement, Forge conversion, Core stages PASS`);

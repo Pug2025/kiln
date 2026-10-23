@@ -50,7 +50,6 @@ export function results(data, { el, nav, reduceMotion }) {
   if (data.rewards) {
     const r = data.rewards;
     rewards = h('div.resource-summary',
-      h('p', `${data.rewardScope || 'This level'}: ${r.caught | 0} caught · ${r.auto | 0} auto-banked`),
       h('p.wallet', `Forge wallet ${formatScore(r.wallet | 0)} · +${formatScore(r.forgeGain | 0)}`),
       h('p', forgeProgressFact(r)));
   }
