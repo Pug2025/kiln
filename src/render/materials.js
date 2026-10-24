@@ -250,9 +250,17 @@ const HEAT_GLSL = `
   totalEmissiveRadiance += vec3(1.0, 0.9, 0.72) * smoothstep(0.9, 1.0, h) * whiteCore * 1.25;
   diffuseColor.rgb *= 1.0 - 0.45 * min(h, 1.0);`;
 
+// A negative instanced heat value is a renderer-only rupture marker: -(1 + heat).
+// Keep the sustained/live and uniform boss shader unchanged. A rupture keeps its warm
+// break cue without washing the neighboring ball into broad white bloom.
+const RUPTURE_HEAT_GLSL = HEAT_GLSL
+  .replace('clamp(vHeat, 0.0, 3.0)', 'clamp(vHeat < 0.0 ? -vHeat - 1.0 : vHeat, 0.0, 3.0)')
+  .replace('diffuseColor.rgb *=', 'totalEmissiveRadiance *= vHeat < 0.0 ? 0.01 : 1.0;\n  diffuseColor.rgb *=');
+
 /**
  * Ceramic core: crackle albedo + normal, heat from the instanced attribute `aHeat` (0 cold, 1
- * molten, above 1 flash). `instanced: false` reads heat from the uniform uHeatValue instead.
+ * molten, above 1 flash; negative encodes -(1 + rupture heat)). `instanced: false` reads heat
+ * from the uniform uHeatValue instead.
  */
 export function coreMaterial(tex, opts = {}) {
   const m = new THREE.MeshStandardMaterial({
@@ -273,7 +281,7 @@ export function coreMaterial(tex, opts = {}) {
       .replace('#include <begin_vertex>', `#include <begin_vertex>\nvHeat = ${instanced ? 'aHeat' : 'uHeatValue'};`);
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', '#include <common>\nvarying float vHeat; uniform vec3 uHeatLo, uHeatHi;')
-      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\n${HEAT_GLSL}`);
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\n${instanced ? RUPTURE_HEAT_GLSL : HEAT_GLSL}`);
   };
   m.userData.u = u;
   m.customProgramCacheKey = () => (instanced ? 'kiln-core-i' : 'kiln-core-u');

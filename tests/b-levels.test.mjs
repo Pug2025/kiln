@@ -73,11 +73,13 @@ test('player-facing text: Kiln words only, and the facts are true', () => {
       const base = getLevel(n), out = applyTwist(base, d.id);
       const [cost, pay] = twistParts(d.id);
       const more = (ch) => count(out, ch) - count(base, ch);
+      const hpBefore = new Map(parseLevel(base).bricks.map((b) => [`${b.row},${b.col}`, b.hp]));
+      const harder = parseLevel(out).bricks.filter((b) => b.hp === hpBefore.get(`${b.row},${b.col}`) + 1).length;
       const say = (k, one, many) => (k === 1 ? `1 ${one}` : `${k} ${many}`);
       const want = {
         moving: base.mode === 'left' ? '2 columns slide' : '2 rows slide',
         armoured: say(more('A'), 'brick armoured', 'bricks armoured'),
-        heavier: 'Bricks take 1 more hit',
+        heavier: `${harder} take 1 more hit`,
         explosive: say(more('E'), 'explodes', 'explode'),
         rich: say(more('?'), 'carries a drop', 'carry a drop'),
       };
@@ -170,7 +172,7 @@ test('carriers: about one brick in seven on levels with drops', () => {
     if (l.kind === 'bonus') continue;
     const p = parseLevel(l);
     const clearable = p.bricks.filter((b) => b.type !== BRICK.INDESTRUCTIBLE && b.type !== BRICK.BOSS && b.type !== BRICK.PORTAL && b.hp > 0);
-    const c = clearable.filter((b) => b.type === BRICK.CARRIER).length;
+    const c = clearable.filter((b) => b.type === BRICK.CARRIER || (b.flags & BF.LOADED)).length;
     if (l.n >= 3 && (l.drops?.rate || c)) {
       carriers += c;
       bricks += clearable.length;

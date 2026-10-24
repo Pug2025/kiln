@@ -14,6 +14,8 @@ import { defaultRules } from '../core/world.js';
 const CLOSERS = Object.freeze(Object.fromEntries(Object.entries(PORTAL_PAIRS).map(([o, c]) => [c, o])));
 const SENTRY_KINDS = Object.freeze(['drifter', 'bomber']);
 const BOSS_IDS = Object.freeze(['stoker', 'crucible', 'core']);
+const LOADED_MATERIALS = Object.freeze(['2', '3', '4', 'A']);
+const LOADED_POWERS = Object.freeze(['laser', 'multi', 'fire', 'wide', 'catch', 'slow', 'life']);
 
 /**
  * Scrolling levels (The Flue): a row joins play once its top edge reaches this line; rows above it
@@ -82,11 +84,12 @@ export function anchorLow(def, lowest = ANCHOR.ROW) {
   const pad = Math.max(0, Math.min(GRID.bottom.rows - kept.length, lowest - last));
   const empty = '.'.repeat(GRID.bottom.cols);
   const out = { ...def, rows: [...Array(pad).fill(empty), ...kept] };
-  if (def.carriers) {
-    out.carriers = {};
-    for (const [key, drop] of Object.entries(def.carriers)) {
+  for (const field of ['carriers', 'loaded']) {
+    if (!def[field]) continue;
+    out[field] = {};
+    for (const [key, value] of Object.entries(def[field])) {
       const [r, c] = key.split(',').map(Number);
-      out.carriers[`${r + pad},${c}`] = drop;
+      out[field][`${r + pad},${c}`] = value;
     }
   }
   if (def.motion) out.motion = def.motion.map((m) => ({ ...m, row: m.row + pad }));
@@ -171,6 +174,12 @@ export function parseLevel(def) {
   const kind = def.kind || 'normal';
   const isBoss = kind === 'boss';
   if (isBoss && !BOSS_IDS.includes(def.boss)) fail(def, `boss level needs boss: ${BOSS_IDS.join('|')}`);
+  for (const [key, material] of Object.entries(def.loaded || {})) {
+    const cell = /^(0|[1-9]\d*),(0|[1-9]\d*)$/.exec(key);
+    if (!cell || def.rows[Number(cell[1])]?.[Number(cell[2])] !== '?') fail(def, `loaded["${key}"] is not a "?" cell`);
+    if (!LOADED_MATERIALS.includes(material)) fail(def, `loaded["${key}"]: material must be ${LOADED_MATERIALS.join('|')}`);
+    if (!LOADED_POWERS.includes(def.carriers?.[key])) fail(def, `loaded["${key}"] needs a fixed good drop (${LOADED_POWERS.join('|')})`);
+  }
 
   const rules = rulesFor(def);
   if (rules.marchMs > 0 && mode !== 'bottom') fail(def, 'march-down is bottom mode only');
@@ -218,12 +227,14 @@ export function parseLevel(def) {
         const dx = x - 360, dy = y - 540;
         if (dx * dx + dy * dy > R2) fail(def, `row ${row} col ${col}: brick outside ring radius ${grid.rMax}`);
       }
-      let flags = e.flags;
+      const key = `${row},${col}`;
+      const loaded = def.loaded?.[key];
+      const material = loaded ? LEGEND[loaded] : e;
+      let flags = material.flags | (loaded ? BF.LOADED : 0);
       // scrolling levels: a row stays hidden until its top edge reaches the entry line
       if (rules.scrollSpeed > 0 ? y - grid.ch / 2 < SCROLL_ENTRY_Y - 1e-6 : y + grid.ch / 2 <= 0) flags |= BF.HIDDEN;
       if (isBoss) flags &= ~BF.CLEARABLE;           // boss levels count weak-point hits instead
       if (isBoss && ch === 'W') flags |= BF.CLEARABLE; // the target the aim line and robot look for
-      const key = `${row},${col}`;
       let drop = -1;
       if (def.carriers && key in def.carriers) {
         if (ch !== '?') fail(def, `carriers["${key}"] is not a "?" cell`);
@@ -231,7 +242,7 @@ export function parseLevel(def) {
         if (drop < 0) fail(def, `carriers["${key}"]: unknown drop "${def.carriers[key]}"`);
       }
       bricks.push({
-        type: e.type, flags, hp: e.hp, tier: e.tier, col, row, x, y, w: grid.cw, h: grid.ch,
+        type: material.type, flags, hp: material.hp, tier: material.tier, col, row, x, y, w: grid.cw, h: grid.ch,
         link: -1, drop, group: -1,
       });
       const idx = bricks.length - 1;

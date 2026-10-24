@@ -13,7 +13,7 @@ import * as audioMod from '../audio/audio.js';
 import * as renderMod from '../render/renderer.js';
 import { createRng } from '../core/rng.js';
 import { worldOf } from './flow.js';
-import { MODS, OVERLOADS, FORGE_ITEMS, FORGE_PRICES, TWISTS, TWIST_FACTS, CREDIT_LINES } from './fallbacks.js';
+import { MODS, OVERLOADS, FORGE_ITEMS, forgePrice, TWISTS, TWIST_FACTS, CREDIT_LINES } from './fallbacks.js';
 import { PRESENT } from './present.js';
 
 /** Where the brief says each export lives (loaded only when the entry modules lack it). */
@@ -130,7 +130,7 @@ function makeApi(f) {
           if (typeof f.nextPrice === 'function') price = f.nextPrice(save, o.id);
           else if (typeof f.forgePrice === 'function') price = f.forgePrice(o.id, rank + 1);
           else if (Array.isArray(it.prices)) price = it.prices[rank];
-          else price = FORGE_PRICES[Math.min(rank, FORGE_PRICES.length - 1)];
+          else price = forgePrice(o.id, rank + 1);
           price = Math.max(0, price | 0);
         }
         const fact = perRank ? String(perRank[Math.min(rank, max - 1)] || '') : o.fact;

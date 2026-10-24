@@ -1,5 +1,5 @@
 // Kiln: inner marks and fittings on bricks (OWNER: C). ART 8 table.
-//   numbered      white digit on a plane inside the glass (hits left), always upright
+//   numbered      warm-white filaments inside the glass, one per hit left
 //   explosive     thin warn-red ring inside the glass, pulsing with the core
 //   carrier       small white (70%) bar and dot, bottom right inside the glass
 //   cavity ball   ('*' cells) a tiny white-hot ball drifting inside clear glass
@@ -7,7 +7,7 @@
 //                 letter, never by colour
 //   gravity       magnetic clamp under the slab: dark-metal bar, two posts, white 2-unit mark 70%
 //   moving        dark-metal rail with a white hairline (50%) and a sliding shoe under the brick
-//   armoured      one dark machined seam; each hit adds a seam and a 0.16 s heat flash along it
+//   armoured      recessed titanium channels, lit for hits left; lost lines flash for 0.16 s
 // Every kind is one InstancedMesh, rebuilt with the wall and re-posed per frame only for bricks that
 // move, pulse or drift. "Under" means toward the paddle in every mode (left mode turns the slab
 // -90 degrees; ring mode turns each clamp to face outward).
@@ -15,16 +15,15 @@
 import * as THREE from 'three';
 import { FIELD, POOL, BRICK, BF, RING } from '../core/constants.js';
 import { LOOK } from './look.js';
-import { PAL } from './materials.js';
+import { PAL, PAL_VEC3 } from './materials.js';
 import { colorVec3, writeColorVec3 } from './palette-uniforms.js';
 import { withOutput } from './shaders.js';
 import { coreProtected } from './boss-feedback.js';
-import { phoneMarkLayout, phonePipLayout, phonePipPosition, glyphInkRect, phoneTargetSegment } from './phone-marks.js';
+import { phoneMarkLayout, hitLineLayout, hitLinePosition, loadedMarkLayout, glyphInkRect, phoneTargetSegment } from './phone-marks.js';
 
 const HW = FIELD.W / 2;
 const HH = FIELD.H / 2;
 const CAP = POOL.BRICKS;
-const SEAM_X = [10, -8, 2, -17, 18, -2];
 
 /** Digit and letter atlas: 0-9 then A-F, Inter Tight 600, white on black (16 cells of 64x128). */
 export function glyphAtlas() {
@@ -113,9 +112,10 @@ export function createMarks(root, M) {
   group.name = 'marks';
   root.add(group);
 
-  // ---- glyph plane (digits and portal letters) ----
+  // ---- portal letter plane (the atlas retains its original cell indices) ----
   const atlas = glyphAtlas();
   M.tex.digits = atlas;
+  const maxDigitAspect = Math.min(1, Math.max(...atlas.userData.inkAspects.subarray(0, 10)));
   const glyphGeo = new THREE.PlaneGeometry(20, 18);
   const glyphCell = new THREE.InstancedBufferAttribute(new Float32Array(CAP), 1);
   glyphCell.setUsage(THREE.DynamicDrawUsage);
@@ -149,7 +149,7 @@ export function createMarks(root, M) {
       }`),
   });
   const glyphs = inst(glyphGeo, glyphMat, CAP, 1);
-  glyphs.name = 'brick-hit-glyphs';
+  glyphs.name = 'brick-hit-fallbacks'; // aCell < 10: HP fallback; aCell >= 10: portal letters
 
   // ---- rings (explosive warn, portal white) ----
   const ringGeo = new THREE.TorusGeometry(8.5, 0.7, 8, 40);
@@ -181,19 +181,35 @@ export function createMarks(root, M) {
   const railLines = inst(new THREE.PlaneGeometry(1, 0.7), M.white50, 64, 1);
   const shoes = inst(new THREE.BoxGeometry(22, 4, 10), M.darkMetal, CAP);
 
-  // ---- armoured seams (instance colour flashes with heat) ----
-  const seamMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-  const seams = inst(new THREE.PlaneGeometry(0.9, 18), seamMat, CAP * 4, 1);
-  const seamCol = new THREE.Color(0x111317);
-  seams.setColorAt(0, seamCol);
-
-  const phoneBackMat = new THREE.MeshBasicMaterial({ color: 0x080a0d });
+  // The dark recess keeps the information independent of a molten core or bright titanium.
+  // Orange edges and a pale centre use the existing heat palette without additive glow.
+  const lineMat = new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false });
+  lineMat.onBeforeCompile = (shader) => {
+    shader.uniforms.uLineHeatLo = { value: PAL_VEC3.heatLo };
+    shader.uniforms.uLineHeatHi = { value: PAL_VEC3.heatHi };
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec2 vLineUv;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvLineUv = uv;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec2 vLineUv; uniform vec3 uLineHeatLo, uLineHeatHi;')
+      .replace('#include <color_fragment>', `#include <color_fragment>
+        float centre = 1.0 - abs(vLineUv.x - 0.5) * 2.0;
+        diffuseColor.rgb *= mix(uLineHeatLo, uLineHeatHi, smoothstep(0.1, 0.85, centre));`);
+  };
+  lineMat.customProgramCacheKey = () => 'kiln-hit-lines';
+  const hitLines = inst(new THREE.PlaneGeometry(1, 1), lineMat, CAP * 9, 7);
+  hitLines.name = 'brick-hit-lines';
+  const lineLit = new THREE.Color(0xffffff).multiplyScalar(0.88);
+  const lineDark = new THREE.Color(0x080a0d);
+  const lineFlash = new THREE.Color(0xffffff).multiplyScalar(0.95);
+  hitLines.setColorAt(0, lineLit);
+  const markBackMat = new THREE.MeshBasicMaterial({ color: 0x080a0d, fog: false });
   const phoneWhite = new THREE.MeshBasicMaterial({ color: 0xf2f4f7 });
   phoneWhite.color.multiplyScalar(0.9); // information stays below the bloom threshold
-  const phoneBacks = inst(new THREE.PlaneGeometry(1, 1), phoneBackMat, CAP * 2, 6);
-  phoneBacks.name = 'brick-phone-backs';
-  const phonePips = inst(new THREE.CircleGeometry(0.5, 12), phoneWhite, CAP * 9, 7);
-  phonePips.name = 'brick-hit-pips';
+  // Hit recesses and symbol backs share the same opaque unit plane, material and order.
+  // One ID owns every slot, so mixed walls keep one draw without overwriting either kind.
+  const markBacks = inst(new THREE.PlaneGeometry(1, 1), markBackMat, CAP * 11, 6);
+  markBacks.name = 'brick-mark-backs';
   const iconGeometry = new THREE.PlaneGeometry(1, 1);
   const iconCell = new THREE.InstancedBufferAttribute(new Float32Array(CAP * 2), 1);
   iconCell.setUsage(THREE.DynamicDrawUsage);
@@ -211,8 +227,17 @@ export function createMarks(root, M) {
       #include <clipping_planes_pars_fragment>
       void main(){
         #include <clipping_planes_fragment>
-        vec4 texel=texture2D(uAtlas,vec2((floor(vCell+0.5)+vUv.x)/5.0,vUv.y));
-        if(texel.a<0.1)discard;gl_FragColor=vec4(vec3(0.80,0.82,0.85),texel.a);
+        if(vCell>4.5){
+          // Loaded power cell: filled white capsule with a dark centre. Its complete ink
+          // height uses the plane, so a tiny lower-row mark does not inherit atlas padding.
+          vec2 p=vec2(max(0.0,abs(vUv.x-0.5)-0.1875)*1.6,vUv.y-0.5);
+          float a=1.0-smoothstep(0.49,0.5,length(p));
+          float hole=smoothstep(0.13,0.18,length(vec2((vUv.x-0.5)*1.6,vUv.y-0.5)));
+          if(a<0.1)discard;gl_FragColor=vec4(vec3(0.80,0.82,0.85)*hole,a);
+        }else{
+          vec4 texel=texture2D(uAtlas,vec2((floor(vCell+0.5)+vUv.x)/5.0,vUv.y));
+          if(texel.a<0.1)discard;gl_FragColor=vec4(vec3(0.80,0.82,0.85),texel.a);
+        }
       }`),
   });
   const phoneIcons = inst(iconGeometry, iconMaterial, CAP * 2, 7);
@@ -223,10 +248,8 @@ export function createMarks(root, M) {
   phoneCorners.setColorAt(0, targetWarm);
   const phoneRings = inst(new THREE.TorusGeometry(0.5, 0.06, 8, 40), phoneWhite, CAP, 7);
   phoneRings.name = 'brick-phone-portal-rings';
-  const phoneFrames = inst(new THREE.PlaneGeometry(1, 1), phoneWhite, CAP * 2, 7);
-  phoneFrames.name = 'brick-phone-armour-edges';
   group.add(glyphs, exRings, portalRings, carrierBar, carrierDot, cavBalls, cavGlows,
-    clampBar, clampPost, clampMark, rails, railLines, shoes, seams, phoneBacks, phonePips, phoneIcons, phoneCorners, phoneRings, phoneFrames);
+    clampBar, clampPost, clampMark, rails, railLines, shoes, hitLines, markBacks, phoneIcons, phoneCorners, phoneRings);
 
   // ---- per-mark bookkeeping (preallocated) ----
   // each entry: mesh id, slot in that mesh, brick, local offset (x, y, z), local scale x, y
@@ -237,16 +260,18 @@ export function createMarks(root, M) {
   const eX = new Float32Array(MAXE), eY = new Float32Array(MAXE), eZ = new Float32Array(MAXE);
   const eSX = new Float32Array(MAXE), eSY = new Float32Array(MAXE);
   const eUpright = new Uint8Array(MAXE); // ignores the slab rotation (glyphs, rings)
-  const eKind = new Uint8Array(MAXE);    // 1 pulse, 2 cavity drift, 3 seam
-  const eAux = new Int16Array(MAXE);     // seam index
+  const eKind = new Uint8Array(MAXE);    // 1 pulse, 2 cavity drift, 3 hit line, 4 HP fallback
+  const eAux = new Int16Array(MAXE);     // hit-line index
   let nE = 0;
-  const meshes = [glyphs, exRings, portalRings, carrierBar, carrierDot, cavBalls, cavGlows, clampBar, clampPost, clampMark, shoes, seams, phoneBacks, phonePips, phoneIcons, phoneCorners, phoneRings, phoneFrames];
-  const ID = { glyphs: 0, exRings: 1, portalRings: 2, carrierBar: 3, carrierDot: 4, cavBalls: 5, cavGlows: 6, clampBar: 7, clampPost: 8, clampMark: 9, shoes: 10, seams: 11, backs: 12, pips: 13, icons: 14, corners: 15, phoneRings: 16, frames: 17 };
+  const meshes = [glyphs, exRings, portalRings, carrierBar, carrierDot, cavBalls, cavGlows, clampBar, clampPost, clampMark, shoes, hitLines, markBacks, phoneIcons, phoneCorners, phoneRings];
+  const ID = { glyphs: 0, exRings: 1, portalRings: 2, carrierBar: 3, carrierDot: 4, cavBalls: 5, cavGlows: 6, clampBar: 7, clampPost: 8, clampMark: 9, shoes: 10, lines: 11, backs: 12, icons: 13, corners: 14, phoneRings: 15 };
   const counts = new Int32Array(meshes.length);
   const entryOfBrickStart = new Int32Array(CAP);
   const entryOfBrickEnd = new Int32Array(CAP);
-  const seamFlashT = new Float32Array(CAP * 4).fill(-1e9);
-  const seamSlotOfBrick = new Int32Array(CAP).fill(-1);
+  const lineFlashT = new Float32Array(CAP).fill(-1e9);
+  const lineFlashFromHp = new Int16Array(CAP);
+  const lineLastHp = new Int16Array(CAP).fill(-1);
+  const lineValue = new Float32Array(CAP * 9).fill(-1);
   const brickRot = new Float32Array(CAP); // ring mode: per-brick rotation so "under" faces outward
   const isSlid = new Uint8Array(CAP); // brick moves (needs re-pose every frame)
   const letterOf = new Int16Array(CAP);
@@ -260,7 +285,7 @@ export function createMarks(root, M) {
   let world = null;
   let mode = 'bottom';
   const readability = { small: false, scale: 1 };
-  const markPlan = {}, pipPlan = {}, pipPoint = {}, targetPlan = {};
+  const markPlan = {}, linePlan = {}, linePoint = {}, targetPlan = {}, loadedPlan = {};
   let targetGuard = null;
 
   const m4 = new THREE.Matrix4();
@@ -289,23 +314,35 @@ export function createMarks(root, M) {
     iconCell.array[eSlot[k]] = icon;
   }
 
-  function phoneCount(i, hp, z, offsetX = 0, width) {
+  function hitsLeft(i, z, offsetX = 0, width, height, offsetY = 0) {
     const B = world.bricks;
-    phoneMarkLayout(readability, width || B.w[i], B.h[i], markPlan);
-    const count = Math.max(1, Math.min(9, hp | 0));
-    if (markPlan.digits) {
-      const h = markPlan.glyphH, w = h * atlas.userData.inkAspects[count];
-      add(ID.backs, i, offsetX, 0, z, w + 3, h + 1, 1);
-      const k = add(ID.glyphs, i, offsetX, 0, z + 0.2, w / 20, h / 18, 1);
+    const maxHp = B.hpMax[i] || B.hp[i] || 1;
+    hitLineLayout(readability, width || B.w[i], height || B.h[i], maxHp, linePlan);
+    // Larger starting counts return to the shared four-channel language once four hits remain.
+    if (linePlan.fallback && B.hp[i] <= 4) hitLineLayout(readability, width || B.w[i], height || B.h[i], Math.min(maxHp, 4), linePlan);
+    if (linePlan.fallback) {
+      const h = linePlan.glyphH, count = Math.max(1, Math.min(9, B.hp[i]));
+      const glyphWidth = h * Math.min(1, atlas.userData.inkAspects[count]);
+      add(ID.backs, i, offsetX, offsetY, z, h * maxDigitAspect + linePlan.pad * 2, h + linePlan.pad * 2, 1);
+      const k = add(ID.glyphs, i, offsetX, offsetY, z + 0.2, glyphWidth / 20, h / 18, 1, 4);
       glyphCell.array[eSlot[k]] = count;
-    } else {
-      phonePipLayout(count, markPlan.innerW, markPlan.innerH, readability.scale, pipPlan);
-      add(ID.backs, i, offsetX, 0, z, pipPlan.width + 3, pipPlan.height + 3, 1);
-      for (let j = 0; j < count; j++) {
-        phonePipPosition(j, pipPlan, pipPoint);
-        add(ID.pips, i, offsetX + pipPoint.x, pipPoint.y, z + 0.2, pipPlan.size, pipPlan.size, 1);
-      }
+    } else for (let j = 0; j < linePlan.count; j++) {
+      hitLinePosition(j, linePlan, linePoint);
+      add(ID.backs, i, offsetX + linePoint.x, offsetY + linePoint.y, z, linePlan.w + linePlan.pad * 2, linePlan.h + linePlan.pad * 2, 1);
+      add(ID.lines, i, offsetX + linePoint.x, offsetY + linePoint.y, z + 0.2, linePlan.w, linePlan.h, 1, 3, j);
     }
+    // Keep the old displayed HP through a rebuild so a hit can flash every removed line.
+    if (lineLastHp[i] < 0) lineLastHp[i] = B.hp[i];
+  }
+
+  function loadedHits(i, z) {
+    const B = world.bricks;
+    loadedMarkLayout(readability, B.w[i], B.h[i], loadedPlan);
+    hitsLeft(i, z, loadedPlan.lineX, loadedPlan.lineWidth, loadedPlan.lineHeight, loadedPlan.lineY);
+    add(ID.backs, i, loadedPlan.powerX, loadedPlan.powerY, z,
+      loadedPlan.powerW + loadedPlan.pad * 2, loadedPlan.powerH + loadedPlan.pad * 2, 1);
+    const k = add(ID.icons, i, loadedPlan.powerX, loadedPlan.powerY, z + 0.2, loadedPlan.powerW, loadedPlan.powerH, 1);
+    iconCell.array[eSlot[k]] = 5;
   }
 
   /** Pose entry k at brick position (bx, by) world units. */
@@ -358,7 +395,9 @@ export function createMarks(root, M) {
     setWorld(w, m) {
       world = w;
       mode = m;
-      seamFlashT.fill(-1e9);
+      lineFlashT.fill(-1e9);
+      lineFlashFromHp.fill(0);
+      lineLastHp.fill(-1);
       targetGuard = null;
     },
 
@@ -369,7 +408,7 @@ export function createMarks(root, M) {
       const B = w.bricks;
       nE = 0;
       counts.fill(0);
-      seamSlotOfBrick.fill(-1);
+      lineValue.fill(-1);
       const zMark = LOOK.MARK_Z;
       const zFront = LOOK.SHELL.d / 2 + 0.15;
       const halfH = 13; // shell half height in the slab frame
@@ -399,12 +438,10 @@ export function createMarks(root, M) {
           add(ID.cavGlows, i, 0, 0, 2, 1, 1, 1, 2);
         } else {
           switch (type) {
-            case BRICK.NUMBERED: {
-              if (phone) { phoneCount(i, B.hp[i], front); break; }
-              const k = add(ID.glyphs, i, 0, 0, zMark, 1, 1, 1);
-              glyphCell.array[eSlot[k]] = Math.max(0, Math.min(9, B.hp[i]));
+            case BRICK.NUMBERED:
+              if (f & BF.LOADED) loadedHits(i, front);
+              else hitsLeft(i, front);
               break;
-            }
             case BRICK.EXPLOSIVE:
               if (phone) {
                 phoneMarkLayout(readability, B.w[i], B.h[i], markPlan);
@@ -449,34 +486,10 @@ export function createMarks(root, M) {
               add(ID.clampPost, i, halfW - 9, -halfH + 3, 0, 1, 1);
               add(ID.clampMark, i, 0, -halfH - 1, 7.2, sq ? 0.5 : 1, phone ? Math.min(2.5, 1.25 / (2 * scale)) : 1);
               break;
-            case BRICK.ARMOURED: {
-              if (phone) {
-                // Upright shield hardware occupies a side strip on wide slabs; small square
-                // plates keep a contained count with titanium corner brackets below.
-                const sideStrip = B.w[i] * scale >= 26;
-                if (sideStrip) {
-                  const iconSize = Math.min(9 / scale, B.h[i] - 6);
-                  phoneIcon(i, 2, -(B.w[i] / 2 - iconSize / 2 - 4), 0, iconSize, front);
-                  phoneCount(i, B.hp[i], front, iconSize / 3, B.w[i] - iconSize - 4);
-                } else {
-                  phoneCount(i, B.hp[i], front);
-                  const stroke = Math.min(1.25 / scale, B.w[i] / 8);
-                  for (let side = -1; side <= 1; side += 2)
-                    add(ID.frames, i, side * (B.w[i] / 2 - stroke / 2 - 1), 0, front + 0.4,
-                      stroke, Math.max(8, B.h[i] - 8), 1);
-                }
-              } else if (f & BF.BOSS) {
-                const digit = add(ID.glyphs, i, 0, 0, zFront + 0.2, 1, 1, 1);
-                glyphCell.array[eSlot[digit]] = Math.max(1, Math.min(9, B.hp[i]));
-              }
-              const hits = Math.max(0, (B.hpMax[i] || 3) - Math.max(0, B.hp[i]));
-              const n = Math.min(SEAM_X.length, 1 + hits);
-              for (let s = 0; s < n; s++) {
-                const k = add(ID.seams, i, sq ? SEAM_X[s] * 0.4 : SEAM_X[s], 0, zFront, phone ? Math.min(2.5, 1 / (0.9 * scale)) : 1, sq ? 0.95 : 1, 0, 3, s);
-                if (s === n - 1) seamSlotOfBrick[i] = eSlot[k];
-              }
+            case BRICK.ARMOURED:
+              if (f & BF.LOADED) loadedHits(i, front);
+              else hitsLeft(i, front);
               break;
-            }
             case BRICK.INDESTRUCTIBLE:
               if (phone) {
                 phoneMarkLayout(readability, B.w[i], B.h[i], markPlan);
@@ -484,7 +497,7 @@ export function createMarks(root, M) {
               }
               break;
             case BRICK.CAVITY:
-              if (phone) phoneCount(i, B.hp[i], front);
+              hitsLeft(i, front);
               break;
             case BRICK.WEAK:
               if (phone) for (let k = 0; k < 8; k++) {
@@ -545,8 +558,11 @@ export function createMarks(root, M) {
         meshes[id].count = counts[id];
         meshes[id].instanceMatrix.needsUpdate = true;
       }
-      for (let s = 0; s < counts[ID.seams]; s++) seams.setColorAt(s, seamCol);
-      if (seams.instanceColor) seams.instanceColor.needsUpdate = true;
+      for (let k = 0; k < nE; k++) if (eKind[k] === 3) {
+        const lit = eAux[k] < B.hp[eBrick[k]];
+        hitLines.setColorAt(eSlot[k], lit ? lineLit : lineDark);
+      }
+      if (hitLines.instanceColor) hitLines.instanceColor.needsUpdate = true;
       glyphCell.needsUpdate = true;
       iconCell.needsUpdate = true;
       targetGuard = null;
@@ -554,9 +570,10 @@ export function createMarks(root, M) {
 
     hit(i, t) {
       if (i < 0 || i >= CAP || !world) return;
-      if (world.bricks.type[i] === BRICK.ARMOURED) {
-        // the new seam appears on the rebuild; flash the newest seam of this brick
-        seamFlashT[i] = t;
+      const B = world.bricks, type = B.type[i];
+      if (type === BRICK.NUMBERED || type === BRICK.ARMOURED || (type === BRICK.CAVITY && !(B.flags[i] & BF.CAVITY_BALL))) {
+        lineFlashFromHp[i] = Math.max(B.hp[i], lineLastHp[i]);
+        lineFlashT[i] = t;
       }
     },
 
@@ -573,16 +590,16 @@ export function createMarks(root, M) {
           pose(k, bxy.x, bxy.y, t);
           dirty = true;
         }
-        if (eMesh[k] === ID.glyphs && B.type[i] === BRICK.NUMBERED) {
-          const v = Math.max(0, Math.min(9, B.hp[i]));
-          if (glyphCell.array[eSlot[k]] !== v) {
-            glyphCell.array[eSlot[k]] = v;
-            if (readability.small) {
-              eSX[k] = eSY[k] * 18 * atlas.userData.inkAspects[v] / 20;
-              brickXY(i, alpha, bxy); pose(k, bxy.x, bxy.y, t); dirty = true;
-            }
+        if (kind === 4) {
+          const hp = Math.max(1, Math.min(9, B.hp[i]));
+          if (glyphCell.array[eSlot[k]] !== hp) {
+            glyphCell.array[eSlot[k]] = hp;
+            eSX[k] = eSY[k] * 18 * Math.min(1, atlas.userData.inkAspects[hp]) / 20;
+            brickXY(i, alpha, bxy); pose(k, bxy.x, bxy.y, t);
+            dirty = true;
             glyphCell.needsUpdate = true;
           }
+          lineLastHp[i] = B.hp[i];
         }
       }
       if (readability.small && phoneCorners.count > 0) {
@@ -593,20 +610,27 @@ export function createMarks(root, M) {
           targetGuard = guarded;
         }
       }
-      // seam heat flash (0.16 s along the newest seam)
-      let flashing = false;
+      // HP is read directly, even when a producer does not bump the wall version. The
+      // removed lines flash briefly, then stay dark; health never counts damage taken.
+      let lineDirty = false;
       for (let k = 0; k < nE; k++) {
         if (eKind[k] !== 3) continue;
-        const i = eBrick[k];
-        const kf = (t - seamFlashT[i]) / LOOK.HIT_FLASH_S;
-        if (kf >= 0 && kf < 1.2 && eSlot[k] === seamSlotOfBrick[i]) {
-          const h = Math.max(0, 1 - kf);
-          tmpCol.copy(seamCol).lerp(PAL.heatHi, h).multiplyScalar(1 + h * 1.5);
-          seams.setColorAt(eSlot[k], tmpCol);
-          flashing = true;
+        const i = eBrick[k], slot = eSlot[k], hp = Math.max(0, B.hp[i]);
+        const elapsed = t - lineFlashT[i];
+        const lost = eAux[k] >= hp && eAux[k] < lineFlashFromHp[i];
+        const flash = lost && elapsed >= 0 && elapsed < LOOK.HIT_FLASH_S ? 1 - elapsed / LOOK.HIT_FLASH_S : 0;
+        const value = eAux[k] < hp ? 1 : flash > 0 ? 1 + flash : 0;
+        if (lineValue[slot] !== value) {
+          if (value === 1) tmpCol.copy(lineLit);
+          else if (value === 0) tmpCol.copy(lineDark);
+          else tmpCol.copy(lineDark).lerp(lineFlash, flash);
+          hitLines.setColorAt(slot, tmpCol);
+          lineValue[slot] = value;
+          lineDirty = true;
         }
+        lineLastHp[i] = hp;
       }
-      if (flashing && seams.instanceColor) seams.instanceColor.needsUpdate = true;
+      if (lineDirty && hitLines.instanceColor) hitLines.instanceColor.needsUpdate = true;
       if (dirty) for (let id = 0; id < meshes.length; id++) meshes[id].instanceMatrix.needsUpdate = true;
     },
   };

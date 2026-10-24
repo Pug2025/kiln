@@ -1,6 +1,7 @@
 // Phone brick information uses field-space geometry sized from the stable rest-view scale.
 // Pure helpers keep dense hit encoding and atlas ink bounds testable without a canvas or WebGL.
-export const PHONE_MARKS = Object.freeze({ CAP_PX: 12.2, ROW_GAP_PX: 1.3, PIP_PX: 2.5, STROKE_PX: 1.25 });
+export const PHONE_MARKS = Object.freeze({ CAP_PX: 12.2, ROW_GAP_PX: 1.3, STROKE_PX: 1.25,
+  HIT_STROKE_PX: 3.05, HIT_GAP_PX: 0.8 });
 
 /** Fill reusable layout facts. Upright marks use the brick's actual field width and height. */
 export function phoneMarkLayout(info, width, height, out) {
@@ -16,27 +17,70 @@ export function phoneMarkLayout(info, width, height, out) {
   return out;
 }
 
-/** A compact count stays within its slab instead of letting enlarged digits cover nearby rows. */
-export function phonePipLayout(count, width, height, scale, out) {
-  out.count = Math.max(0, Math.min(9, count | 0));
-  out.cols = Math.min(out.count || 1, width > height * 1.25 ? 5 : 3);
-  out.rows = Math.ceil(out.count / out.cols) || 1;
-  const s = Math.max(0.05, scale || 1);
-  out.size = Math.min(PHONE_MARKS.PIP_PX / s,
-    Math.max(1, width - 4) / (out.cols + (out.cols - 1) * 0.5),
-    Math.max(1, height - 4) / (out.rows + (out.rows - 1) * 0.5));
-  out.gap = out.size * 0.5;
-  out.width = out.cols * out.size + (out.cols - 1) * out.gap;
-  out.height = out.rows * out.size + (out.rows - 1) * out.gap;
+/** Fixed channels do not move as HP falls. A numeral is the explicit no-fit fallback. */
+export function hitLineLayout(info, width, height, maxHits, out) {
+  const small = !!info?.small, scale = Math.max(0.05, Number(info?.scale) || 1);
+  const count = Math.max(1, Math.min(9, maxHits | 0));
+  const pad = small ? 0.2 / scale : 0.8;
+  const innerW = Math.max(0.1, width - 4 - pad * 2), innerH = Math.max(0.1, height - 4 - pad * 2);
+  const stroke = small ? PHONE_MARKS.HIT_STROKE_PX / scale : 2.4;
+  const gap = small ? PHONE_MARKS.HIT_GAP_PX / scale : 4;
+  const span = count * stroke + (count - 1) * gap;
+  out.count = count;
+  out.compact = false;
+  if (span <= innerW && stroke <= innerH) {
+    out.cols = count; out.rows = 1;
+    out.w = stroke; out.h = Math.min(18, innerH);
+  } else if (span <= innerH && stroke <= innerW) {
+    out.cols = 1; out.rows = count;
+    out.w = Math.min(18, innerW); out.h = stroke;
+  } else {
+    out.compact = true;
+    out.cols = Math.min(count, Math.max(1, Math.floor((innerW + gap) / (stroke + gap))));
+    out.rows = Math.ceil(count / out.cols);
+    out.w = Math.max(stroke, Math.min(stroke * 1.35, (innerW - gap * (out.cols - 1)) / out.cols));
+    out.h = stroke;
+  }
+  out.gap = gap;
+  out.width = out.cols * out.w + (out.cols - 1) * gap;
+  out.height = out.rows * out.h + (out.rows - 1) * gap;
+  out.pad = pad;
+  out.fallback = out.width > innerW + 1e-6 || out.height > innerH + 1e-6;
+  out.mode = out.fallback ? 'glyph' : out.compact ? 'compact' : 'lines';
+  out.floorMet = !out.fallback && (!small || Math.min(out.w, out.h) * scale >= 3);
+  // Ink, backing and row gaps must fit the real cell. Dense fallback caps are intentionally
+  // smaller than the ordinary portal-letter cap; no numeral can spill into the next brick.
+  out.glyphH = Math.min(PHONE_MARKS.CAP_PX / scale, innerH, innerW);
   return out;
 }
 
-/** Position one pip in the reusable count layout, centred row by row. */
-export function phonePipPosition(index, plan, out) {
+/** Channel positions are stable, including the unlit channels after a hit. */
+export function hitLinePosition(index, plan, out) {
   const row = Math.floor(index / plan.cols), col = index % plan.cols;
-  const rowCount = Math.min(plan.cols, plan.count - row * plan.cols);
-  out.x = (col - (rowCount - 1) / 2) * (plan.size + plan.gap);
-  out.y = ((plan.rows - 1) / 2 - row) * (plan.size + plan.gap);
+  out.x = (col - (plan.cols - 1) / 2) * (plan.w + plan.gap);
+  out.y = ((plan.rows - 1) / 2 - row) * (plan.h + plan.gap);
+  return out;
+}
+
+/** Loaded marks reserve a side strip on slabs, or a lower row on square/tall faces. */
+export function loadedMarkLayout(info, width, height, out) {
+  const small = !!info?.small, scale = Math.max(0.05, Number(info?.scale) || 1);
+  const pad = small ? 0.2 / scale : 0.8;
+  const innerW = Math.max(0.1, width - 4), innerH = Math.max(0.1, height - 4);
+  const stroke = small ? PHONE_MARKS.HIT_STROKE_PX / scale : 7.5;
+  const gap = small ? PHONE_MARKS.HIT_GAP_PX / scale : 3;
+  out.stacked = width <= height * 1.25;
+  const targetH = out.stacked ? stroke : small ? Math.min(6 / scale, Math.max(stroke, innerW * 0.2)) : stroke;
+  out.powerH = Math.min(targetH, Math.max(0.1, innerH - pad * 2), Math.max(0.1, innerW - pad * 2) / 1.6);
+  out.powerW = out.powerH * 1.6;
+  out.powerX = out.stacked ? 0 : innerW / 2 - pad - out.powerW / 2;
+  out.powerY = out.stacked ? -innerH / 2 + pad + out.powerH / 2 : 0;
+  out.lineX = out.stacked ? 0 : -(out.powerW + gap) / 2;
+  out.lineY = out.stacked ? (out.powerH + gap) / 2 : 0;
+  out.lineWidth = out.stacked ? width : Math.max(0.1, width - out.powerW - gap);
+  out.lineHeight = out.stacked ? Math.max(0.1, height - out.powerH - gap) : height;
+  out.pad = pad;
+  out.powerFloorMet = !small || out.powerH * scale >= 3;
   return out;
 }
 

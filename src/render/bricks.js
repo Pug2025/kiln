@@ -78,6 +78,7 @@ export function createBricks(scene, M) {
         const cg = coreBase.clone();
         heat = new THREE.InstancedBufferAttribute(new Float32Array(CAP), 1);
         heat.setUsage(THREE.DynamicDrawUsage);
+        // Positive heat is live; negative -(1 + heat) identifies a transient rupture.
         cg.setAttribute('aHeat', heat);
         core = new THREE.InstancedMesh(cg, M.core, CAP);
         core.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -109,6 +110,7 @@ export function createBricks(scene, M) {
   const lastAlive = new Uint8Array(POOL.BRICKS);
   const lastFlags = new Uint16Array(POOL.BRICKS);
   const lastType = new Uint8Array(POOL.BRICKS);
+  const lastHpBand = new Uint8Array(POOL.BRICKS);
   const slotOf = new Int32Array(POOL.BRICKS).fill(-1);
   const grpOf = new Int8Array(POOL.BRICKS).fill(-1);
   const inMotionRow = new Uint8Array(POOL.BRICKS);
@@ -197,6 +199,7 @@ export function createBricks(scene, M) {
       lastAlive[i] = B.alive[i];
       lastFlags[i] = B.flags[i];
       lastType[i] = B.type[i];
+      lastHpBand[i] = B.hp[i] > 4 ? 1 : 0;
       slotOf[i] = -1;
       grpOf[i] = -1;
       if (!B.alive[i] || (B.flags[i] & BF.HIDDEN)) continue;
@@ -230,7 +233,7 @@ export function createBricks(scene, M) {
     const B = world.bricks;
     if (B.version !== version || B.count !== lastCount) return true;
     for (let i = 0; i < B.count; i++) {
-      if (B.alive[i] !== lastAlive[i] || B.flags[i] !== lastFlags[i] || B.type[i] !== lastType[i]) return true;
+      if (B.alive[i] !== lastAlive[i] || B.flags[i] !== lastFlags[i] || B.type[i] !== lastType[i] || (B.hp[i] > 4 ? 1 : 0) !== lastHpBand[i]) return true;
     }
     return false;
   }
@@ -252,7 +255,9 @@ export function createBricks(scene, M) {
         return LOOK.EXPLOSIVE_LO + (LOOK.EXPLOSIVE_HI - LOOK.EXPLOSIVE_LO) * k;
       }
       case BRICK.WEAK: return isBossCore(world, i) && coreProtected(world) ? CORE_COOL_HEAT : LOOK.HEAT_WEAK;
-      case BRICK.CARRIER: case BRICK.CAVITY: case BRICK.GRAVITY: case BRICK.PORTAL:
+      case BRICK.CAVITY:
+        return LOOK.HEAT_NUMBERED_MIN + (LOOK.HEAT_SPECIAL - LOOK.HEAT_NUMBERED_MIN) * Math.max(0, B.hp[i]) / (B.hpMax[i] || 1);
+      case BRICK.CARRIER: case BRICK.GRAVITY: case BRICK.PORTAL:
         return inMotionRow[i] ? LOOK.HEAT_MOVING : LOOK.HEAT_SPECIAL;
       default: return 0.12;
     }
@@ -315,8 +320,6 @@ export function createBricks(scene, M) {
     hit(i, t) {
       if (i >= 0 && i < POOL.BRICKS) {
         flashT[i] = t;
-        // armoured seams count hits: re-read hp even if B did not bump the version
-        if (world && world.bricks.type[i] === BRICK.ARMOURED) force = true;
       }
       marks.hit(i, t);
     },
@@ -399,7 +402,7 @@ export function createBricks(scene, M) {
           const kb = el / dur;
           composeAt(r.x, r.y, r.w, r.h, r.burn ? 1 - 0.85 * kb * kb : 1);
           setSlot(gr, n, false);
-          if (hb) hb[n] = r.burn ? r.heat + LOOK.BURN_HEAT * Math.min(1, kb * 1.6) : r.heat + LOOK.RUPTURE_FLASH * Math.min(1, el / 0.08);
+          if (hb) hb[n] = r.burn ? r.heat + LOOK.BURN_HEAT * Math.min(1, kb * 1.6) : -(1 + r.heat + LOOK.RUPTURE_FLASH * Math.min(1, el / 0.08));
           n++;
           moved = true;
         }

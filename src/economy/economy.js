@@ -238,7 +238,7 @@ export function createEconomy() {
     // a drop that lands after the win can never be used.
     if (st.awarded || (world.level.total > 0 && world.level.remaining <= 0)) return;
     const B = world.bricks;
-    const isCarrier = i >= 0 && i < B.drop.length && type === BRICK.CARRIER;
+    const isCarrier = i >= 0 && i < B.drop.length && (type === BRICK.CARRIER || (B.flags[i] & BF.LOADED));
     if (isCarrier) {
       let kind = B.drop[i];
       if (kind < 0 || kind === DROP.MEGA) kind = rng.weighted(weights);

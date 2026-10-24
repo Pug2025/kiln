@@ -215,6 +215,7 @@ export const BF = freeze({
   EXPLOSIVE: 512,
   ARMOURED: 1024,
   CAVITY_BALL: 2048, // the cell holds a sealed ball (non-solid until freed)
+  LOADED: 4096,     // numbered glass or armour carrying a fixed good drop
 });
 
 // Damage sources (BRICK_HIT event `b`).

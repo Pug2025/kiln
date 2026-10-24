@@ -40,6 +40,7 @@ export default [
 | `hint` | string | none | optional one-line fact. Information, never an instruction ("Armour takes 3 hits." not "Hit the armour 3 times!") |
 | `drops` | `{rate, table}` | `{rate:0, table:{}}` | `rate` = chance a broken non-carrier brick releases a drop; `table` = weights by drop name (`wide slow multi fire laser catch thru life shrink fast fog mega`) used for random drops and `?` carriers |
 | `carriers` | `{"row,col": dropName}` | `{}` | fixed drop for a specific `?` cell |
+| `loaded` | `{"row,col": "2"·"3"·"4"·"A"}` | `{}` | tougher material for an existing `?` carrier; requires a fixed Laser, Multi, Fire, Wide, Catch, Slow or Life in `carriers` |
 | `rules` | object | all off | see Rules |
 | `motion` | `[{row, speed, dir?, style?}]` | `[]` | rows that slide on a rail: `speed` u/s, `dir` ±1, `style` `'bounce'` (default, turns at the field walls) or `'wrap'` (leaves one side, re-enters the other). Left mode uses `col` instead of `row` (a column sliding along y). Not in ring mode |
 | `sentries` | `[{kind, x?, y?, atMs?, everyMs?, along?, across?}]` | `[]` | sentries (`'drifter'`, `'bomber'`); position from an `S` cell when x/y are omitted; `atMs` first spawn, `everyMs` respawn after a kill (0 = never); `along`/`across` override the patrol size (units). In bottom mode they always keep below the wall |
@@ -109,6 +110,12 @@ through `sprinkleCarriers` (parser.js): plain `a`/`b` bricks become random `?` c
 evenly and counted from the row nearest the paddle, until the share is about 1 in 7 (molten `c`
 bricks stay molten unless a level runs short of `a`/`b`). Every carrier has its
 drop kind rolled at load from the level table (`bricks.drop`), so E, C and the HUD agree on it.
+
+From Blaze onward, selected carriers use `loaded` metadata: their raw cell stays `?`, while the
+parser gives them numbered glass or armour and `BF.LOADED`. They retain the power mark alongside
+their hit lines and release their fixed good power only when broken. Existing carriers and the
+legend keep their meaning. Gate hardening excludes loaded carriers, just as it excludes `?`.
+`anchorLow` moves `loaded` keys together with `carriers` keys.
 
 ## Placement (lead rule from the playtest)
 

@@ -13,6 +13,8 @@
 // Pure functions on LevelDefs: no DOM, no clock, no randomness. The public API is twistsFor(n) and
 // applyTwist(def, id) in src/levels/index.js.
 
+import { LEGEND } from '../levels/legend.js';
+
 /** @typedef {{id:string, label:string, fact:string}} Twist */
 
 const PLAIN = 'abc';
@@ -132,10 +134,12 @@ export function door(def, cost, pay) {
   const c = TWISTS[cost], p = TWISTS[pay];
   const out = applyTwistDef(def, id);
   const a = added(def, out, 'A'), e = added(def, out, 'E'), r = added(def, out, '?');
+  const h = def.rows.reduce((n, line, row) => n + [...line].filter((ch, col) =>
+    LEGEND[out.rows[row][col]].hp === LEGEND[ch].hp + 1).length, 0);
   const what = {
     moving: mode(def) === 'left' ? '2 columns slide' : '2 rows slide',
     armoured: a === 1 ? '1 brick armoured' : `${a} bricks armoured`,
-    heavier: 'Bricks take 1 more hit',
+    heavier: `${h} take 1 more hit`,
     explosive: e === 1 ? '1 explodes' : `${e} explode`,
     rich: r === 1 ? '1 carries a drop' : `${r} carry a drop`,
   };

@@ -137,6 +137,7 @@
  * @property {string} [adds]            one short fact for the level card: what is new ("Numbered bricks")
  * @property {{rate?:number, table?:Object<string, number>}} [drops]  random-drop chance per broken brick and weights by drop name
  * @property {Object<string, string>} [carriers]  "row,col" → drop name for '?' cells with a fixed drop
+ * @property {Object<string, '2'|'3'|'4'|'A'>} [loaded]  B: tougher material for a '?' cell with a fixed good drop
  * @property {Partial<LevelRules>} [rules]
  * @property {MotionRow[]} [motion]
  * @property {SentrySpawn[]} [sentries]
