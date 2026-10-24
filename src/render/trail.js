@@ -4,7 +4,7 @@
 
 import * as THREE from 'three';
 import { FIELD, BALL } from '../core/constants.js';
-import { PAL } from './materials.js';
+import { PAL_VEC3 } from './materials.js';
 import { NOISE, withOutput } from './shaders.js';
 
 const HW = FIELD.W / 2;
@@ -46,7 +46,7 @@ export function createTrail(scene) {
     depthWrite: false,
     blending: THREE.AdditiveBlending,
     side: THREE.DoubleSide,
-    uniforms: { uTime: { value: 0 }, uHeatLo: { value: PAL.heatLo }, uHeatHi: { value: PAL.heatHi } },
+    uniforms: { uTime: { value: 0 }, uHeatLo: { value: PAL_VEC3.heatLo }, uHeatHi: { value: PAL_VEC3.heatHi } },
     vertexShader: `attribute float aGain; varying vec2 vUv; varying float vGain;
       void main(){ vUv = uv; vGain = aGain; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
     fragmentShader: withOutput(`precision highp float; varying vec2 vUv; varying float vGain; uniform float uTime; uniform vec3 uHeatLo, uHeatHi;

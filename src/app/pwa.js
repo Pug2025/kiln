@@ -25,6 +25,8 @@ export function initPwa(opts) {
   const ios = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   let deferred = null;
   let pendingReload = false;
+  let pendingToast = false;
+  let toastReady = false;
 
   window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault();
@@ -35,16 +37,24 @@ export function initPwa(opts) {
   // "Updated" once, after reloading into a new build
   try {
     if (sessionStorage.getItem(UPDATED_KEY)) {
-      sessionStorage.removeItem(UPDATED_KEY);
-      setTimeout(() => opts.toast('Kiln updated'), 900);
+      pendingToast = true;
+      setTimeout(() => { toastReady = true; maybeToast(); }, 900);
     }
   } catch { /* storage blocked */ }
 
+  function maybeToast() {
+    if (!pendingToast || !toastReady || !opts.canToast()) return;
+    pendingToast = false;
+    try { sessionStorage.removeItem(UPDATED_KEY); } catch { /* storage blocked */ }
+    opts.toast('Kiln updated');
+  }
+
   function maybeReload() {
-    if (!pendingReload || !opts.canReload()) return;
+    if (!pendingReload || !opts.canReload()) return false;
     pendingReload = false;
     try { sessionStorage.setItem(UPDATED_KEY, '1'); } catch { /* the toast is skipped */ }
     location.reload();
+    return true;
   }
 
   if (!sw && local && 'serviceWorker' in navigator) {
@@ -54,9 +64,12 @@ export function initPwa(opts) {
   }
 
   if (sw) {
-    const hadController = !!navigator.serviceWorker.controller;
+    let hadController = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.addEventListener('controllerchange', () => {
       if (hadController) { pendingReload = true; maybeReload(); }
+      // The first install claims this page without a reload. A later upgrade in the same page
+      // life still needs the normal safe-point reload.
+      hadController = !!navigator.serviceWorker.controller;
     });
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((reg) => {
       document.addEventListener('visibilitychange', () => { if (!document.hidden) reg.update().catch(() => {}); });
@@ -74,7 +87,7 @@ export function initPwa(opts) {
         }).catch(() => {});
       }, 4000);
     });
-    setInterval(maybeReload, 1500);
+    setInterval(() => { if (!maybeReload()) maybeToast(); }, 1500);
   }
 
   return {
@@ -93,6 +106,6 @@ export function initPwa(opts) {
       Promise.resolve(e.userChoice).catch(() => {});
     },
     /** main.js calls this when it reaches a safe point (title or map). */
-    safePoint: maybeReload,
+    safePoint() { if (!maybeReload()) maybeToast(); },
   };
 }

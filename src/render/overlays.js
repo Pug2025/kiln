@@ -7,7 +7,7 @@
 
 import * as THREE from 'three';
 import { FIELD, BALL, RING } from '../core/constants.js';
-import { PAL } from './materials.js';
+import { PAL_VEC3 } from './materials.js';
 import { NOISE, withOutput } from './shaders.js';
 
 const HW = FIELD.W / 2;
@@ -23,7 +23,7 @@ export function createOverlays(scene) {
     transparent: true,
     depthWrite: false,
     depthTest: false,
-    uniforms: { uDark: { value: 0 }, uL: { value: lanterns }, uBase: { value: PAL.base } },
+    uniforms: { uDark: { value: 0 }, uL: { value: lanterns }, uBase: { value: PAL_VEC3.base } },
     vertexShader: VERT,
     fragmentShader: withOutput(`precision highp float; varying vec3 vW; uniform float uDark; uniform vec4 uL[${NL}]; uniform vec3 uBase;
       void main(){
@@ -49,7 +49,7 @@ export function createOverlays(scene) {
   const fogMat = new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: false,
-    uniforms: { uFog: { value: 0 }, uTime: { value: 0 }, uMode: { value: 0 }, uHeatLo: { value: PAL.heatLo } },
+    uniforms: { uFog: { value: 0 }, uTime: { value: 0 }, uMode: { value: 0 }, uHeatLo: { value: PAL_VEC3.heatLo } },
     vertexShader: VERT,
     fragmentShader: withOutput(`precision highp float; varying vec3 vW; uniform float uFog, uTime, uMode; uniform vec3 uHeatLo;
       ${NOISE}

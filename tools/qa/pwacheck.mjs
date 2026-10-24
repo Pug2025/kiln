@@ -36,6 +36,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const CDN = /^https:\/\/(cdn\.jsdelivr\.net\/npm\/three@|fonts\.googleapis\.com\/|fonts\.gstatic\.com\/)/;
 const RUNTIME = 'kiln-runtime-v1';
+const UPDATED_TOAST = 'Kiln updated';
 
 function parseArgs(argv) {
   const o = { device: 'pixel7', root: resolve(HERE, '..', '..'), levels: [1, 10], json: '', headed: false, warmSeconds: 120 };
@@ -110,9 +111,21 @@ function judge(name, problem, checks, log) {
 const BOOTED = `window.__kiln && document.body.classList.contains('ready') && !!window.__kiln.ui.current`;
 
 /** Start level n the way the game does and let it play for `ms`; returns what was seen. */
-async function playLevel(page, n, ms) {
-  await page.eval(`window.__kiln.startLevel(${n})`);
+async function playLevel(page, n, ms, device) {
+  // startLevel may await a Mod/Overload choice. Do not await its promise through Runtime.evaluate.
+  await page.eval(`window.__kiln.startLevel(${n}); true`);
+  for (let i = 0; i < 6; i++) {
+    const state = await page.waitFor(`window.__kiln.ui.current === 'pick' ? 'pick' : (window.__kiln.world && window.__kiln.world.level.def.n === ${n} && window.__kiln.app.mode === 'play' ? 'play' : '')`, { timeoutMs: 20000 });
+    if (state === 'play') break;
+    const choose = await page.eval(`(() => { const b = document.querySelector('#ui button.btn.primary'); if (!b) return null; const r = b.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()`);
+    if (!choose) throw new Error(`level ${n}: no pre-level Choose button`);
+    await (device.touch ? tap(page, ...choose) : click(page, ...choose));
+    await sleep(200);
+  }
   await page.waitFor(`window.__kiln.world && window.__kiln.world.level.def.n === ${n} && window.__kiln.app.mode === 'play'`, { timeoutMs: 20000 });
+  const launchAt = await page.eval(`(() => { const r = document.querySelector('#stage').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height * 0.8]; })()`);
+  await (device.touch ? tap(page, ...launchAt) : click(page, ...launchAt));
+  await page.waitFor(`window.__kiln.world.phase === 'play'`, { timeoutMs: 5000 });
   const a = await page.eval(`({ steps: window.__kiln.stats.steps, frames: window.__kiln.stats.frames })`);
   await sleep(ms);
   return page.eval(`({ steps: window.__kiln.stats.steps - ${a.steps}, frames: window.__kiln.stats.frames - ${a.frames},
@@ -153,7 +166,13 @@ async function main() {
   let build = 'qa-1';
   const served = [];
   const serveOpts = {
-    transform: (p, body) => (p === '/sw.js' ? body.toString('utf8').replace(/const BUILD = '[^']*';/, `const BUILD = '${build}';`) : null),
+    transform: (p, body) => {
+      if (p !== '/sw.js') return null;
+      let source = body.toString('utf8').replace(/const BUILD = '[^']*';/, `const BUILD = '${build}';`);
+      // A real failed fetch during installation, without altering a shipped file on disk.
+      if (build === 'qa-failed') source = source.replace('const FILES = [', "const FILES = [\n  'kiln-qa-required-missing.js',");
+      return source;
+    },
     onRequest: (p) => served.push(p),
   };
   let server = await serveStatic(o.root, serveOpts);
@@ -166,6 +185,61 @@ async function main() {
   const notes = {};
   const sink = { errors: [], network: [], fromSw: 0 };
   let chrome = null;
+  const exerciseUpgrade = async (page, label, nextBuild) => {
+    const detail = notes[label] = {};
+    const result = (name, problem) => judge(`${label}-${name}`, problem, checks, log);
+    let navigations = 0;
+    await page.send('Page.enable');
+    const unwatch = page.on('Page.frameNavigated', (e) => { if (!e.frame.parentId) navigations++; });
+    const firstBuild = await page.eval(`caches.keys().then((k) => k.filter((n) => n.startsWith('kiln-core-')).join(','))`);
+    await page.eval(`window.__qaMark = 1; window.__qaCC = 0; navigator.serviceWorker.addEventListener('controllerchange', () => { window.__qaCC++; }); true`);
+    const live = await playLevel(page, o.levels[0] || 1, 500, device);
+    const navBefore = navigations;
+    build = nextBuild;
+    // what a deploy looks like to an open page: its next update check (pwa.js runs one whenever the
+    // tab becomes visible again; the browser on navigations) finds a changed sw.js
+    await page.eval(`navigator.serviceWorker.getRegistration().then((r) => r && r.update()).then(() => true)`);
+    const took = await page.waitFor(`window.__qaCC > 0 || (window.__qaMark !== 1 && 'reloaded')`, { timeoutMs: 30000 }).catch(() => 0);
+    await sleep(4000); // pwa.js checks for a safe point every 1.5 s
+    const stillPlaying = await page.eval(`window.__qaMark === 1 && window.__kiln.app.mode === 'play'`).catch(() => false);
+    result('update-takes-over', took ? '' : `the new worker did not take control within 30 s (caches before: ${firstBuild})`);
+    result('no-reload-in-play', stillPlaying && navigations === navBefore ? '' : `the page reloaded or left play during live play (${navigations - navBefore} navigations)`);
+    // the player's way out: Pause (a real tap on the HUD button, P on desktop), then Levels
+    const pauseAt = await page.eval(`(() => { const b = document.querySelector('[aria-label="Pause"], .hud .pause, button.pause'); if (!b) return null; const r = b.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()`);
+    if (pauseAt) await (device.touch ? tap(page, pauseAt[0], pauseAt[1]) : click(page, pauseAt[0], pauseAt[1]));
+    else await page.eval(`window.__kiln.pause('user')`);
+    await page.waitFor(`window.__kiln.ui.current === 'pause'`, { timeoutMs: 5000 }).catch(() => {});
+    await sleep(300);
+    const levelsAt = await centerOfText(page, '^Levels');
+    if (levelsAt) await (device.touch ? tap(page, levelsAt[0], levelsAt[1]) : click(page, levelsAt[0], levelsAt[1]));
+    else await page.eval(`window.__kiln.showMap()`);
+    const reloadedAt = Date.now();
+    const reloaded = await page.waitFor(`window.__qaMark === undefined && !!(${BOOTED})`, { timeoutMs: 8000 }).catch(() => false);
+    let toast = '';
+    if (reloaded) {
+      toast = await page.waitFor(`(() => { const t = document.querySelector('.toast.in'); return t && t.textContent.trim(); })()`, { timeoutMs: 5000, everyMs: 50 }).catch(() => '');
+    }
+    detail.toastAfterMs = toast ? Date.now() - reloadedAt : null;
+    result('reload-at-safe-point', reloaded ? '' : `no reload within 8 s of reaching the level map (pause found ${!!pauseAt}, Levels found ${!!levelsAt})`);
+    detail.updatedToast = toast;
+    result('updated-toast', toast === UPDATED_TOAST ? '' : `toast "${toast}" after the reload`);
+    if (o.json && toast === UPDATED_TOAST) {
+      detail.toastScreenshot = `${o.json.replace(/\.json$/i, '')}-${label}-toast.png`;
+      writeFileSync(detail.toastScreenshot, await page.screenshot());
+    }
+    const cacheMap = await page.eval(CACHES);
+    const coreNames = Object.keys(cacheMap).filter((n) => n.startsWith('kiln-core-'));
+    result('old-cache-dropped', coreNames.join(',') === `kiln-core-${nextBuild}` ? '' : `core caches now: ${coreNames.join(', ') || 'none'}`);
+    // "Updated" is said once: a second reload is quiet
+    await page.eval(`window.__qaMark = 2; location.reload(); true`).catch(() => {});
+    await sleep(500);
+    const secondReload = await page.waitFor(`window.__qaMark === undefined && !!(${BOOTED})`, { timeoutMs: 20000 }).catch(() => false);
+    result('second-reload', secondReload ? '' : 'the once-only check did not reach a fresh boot');
+    const again = await page.waitFor(`(() => { const t = document.querySelector('.toast.in'); return t && t.textContent.trim(); })()`, { timeoutMs: 2500, everyMs: 50 }).catch(() => '');
+    result('updated-once', again === UPDATED_TOAST ? 'the update toast came back on the next reload' : '');
+    detail.live = live;
+    unwatch();
+  };
   log(`Kiln PWA check: ${device.name} ${device.width}x${device.height}, ${base}, ${coreFiles.length} core files + ${music.length} music`);
   try {
     // ------------------------------------------------------------------ 1 install
@@ -218,6 +292,9 @@ async function main() {
     const instErr = (inst.installabilityErrors || []).map((e) => e.errorId + (e.errorArguments?.length ? ` (${e.errorArguments.map((a) => `${a.name}=${a.value}`).join(', ')})` : ''));
     judge('installable', instErr.join('; '), checks, log);
 
+    log('1b upgrade on the original first-install page');
+    await exerciseUpgrade(page, 'first-visit', 'qa-first-upgrade');
+
     // core cache: every shipped file except the music, which is warmed after
     const coreName = `kiln-core-${build}`;
     let cacheMap = {};
@@ -257,6 +334,30 @@ async function main() {
     judge('music-warm', cold.length ? `${cold.length} of ${music.length} music files not cached after ${o.warmSeconds} s: ${cold.slice(0, 3).join(', ')}` : '', checks, log);
     log(`  (${used.length} CDN files, music warm after ${notes.warmSeconds} s, ${sink.fromSw} responses from the worker so far)`);
     judge('errors-online', [...new Set([...sink.errors, ...sink.network])].slice(0, 6).join(' | '), checks, log);
+    log('1c failed upgrade preserves the last complete offline build');
+    const stableBuild = build;
+    await page.eval(`window.__qaFailedCC = 0; navigator.serviceWorker.addEventListener('controllerchange', () => window.__qaFailedCC++); true`);
+    build = 'qa-failed';
+    const failedState = await page.eval(`(async () => {
+      const r = await navigator.serviceWorker.getRegistration();
+      let w = null;
+      r.addEventListener('updatefound', () => { w = r.installing; }, { once: true });
+      await r.update();
+      w = w || r.installing;
+      if (!w) return 'no installing worker';
+      return new Promise((resolve) => {
+        const check = () => { if (w.state === 'redundant' || w.state === 'activated') resolve(w.state); };
+        w.addEventListener('statechange', check); check();
+        setTimeout(() => resolve('timeout: ' + w.state), 20000);
+      });
+    })()`);
+    judge('failed-upgrade-rejected', failedState === 'redundant' ? '' : `failed worker state: ${failedState}`, checks, log);
+    const unchanged = await page.eval(`window.__qaFailedCC === 0`);
+    const preserved = await page.eval(`caches.has(${JSON.stringify(coreName)})`);
+    judge('failed-upgrade-preserves-worker', unchanged && preserved ? '' : `controller unchanged: ${unchanged}, previous cache present: ${preserved}`, checks, log);
+    const partial = await page.eval(`caches.has('kiln-core-qa-failed')`);
+    judge('failed-upgrade-cache-cleaned', partial ? 'the failed upgrade retained its partial cache' : '', checks, log);
+    build = stableBuild;
     // only the worker's caches may count offline: Chrome's own HTTP cache would keep three.js (a
     // year-long max-age) where Safari may not
     await page.send('Network.clearBrowserCache');
@@ -292,7 +393,7 @@ async function main() {
       await tap(page, 4, 4);
       for (const n of o.levels) {
         try {
-          const r = await playLevel(page, n, 3000);
+          const r = await playLevel(page, n, 3000, device);
           let m = { decoded: r.decoded || 0, streaming: !!r.streaming };
           for (let t = 0; t < 50 && !m.decoded && !m.streaming; t++) {
             await sleep(100);
@@ -323,53 +424,10 @@ async function main() {
     page = await chrome.newPage();
     await watch(page, upd);
     await emulateDevice(page, device);
-    let navigations = 0;
-    await page.send('Page.enable');
-    page.on('Page.frameNavigated', (e) => { if (!e.frame.parentId) navigations++; });
     await page.navigate(start);
     await page.waitFor(BOOTED, { timeoutMs: 30000 });
-    const firstBuild = await page.eval(`caches.keys().then((k) => k.filter((n) => n.startsWith('kiln-core-')).join(','))`);
-    await page.eval(`window.__qaMark = 1; window.__qaCC = 0; navigator.serviceWorker.addEventListener('controllerchange', () => { window.__qaCC++; }); true`);
-    const live = await playLevel(page, o.levels[0] || 1, 500);
-    const navBefore = navigations;
-    build = 'qa-2';
-    // what a deploy looks like to an open page: its next update check (pwa.js runs one whenever the
-    // tab becomes visible again; the browser on navigations) finds a changed sw.js
-    await page.eval(`navigator.serviceWorker.getRegistration().then((r) => r && r.update()).then(() => true)`);
-    const took = await page.waitFor(`window.__qaCC > 0 || (window.__qaMark !== 1 && 'reloaded')`, { timeoutMs: 30000 }).catch(() => 0);
-    await sleep(4000); // pwa.js checks for a safe point every 1.5 s
-    const stillPlaying = await page.eval(`window.__qaMark === 1 && window.__kiln.app.mode === 'play'`).catch(() => false);
-    judge('update-takes-over', took ? '' : `the new worker did not take control within 30 s (caches before: ${firstBuild})`, checks, log);
-    judge('no-reload-in-play', stillPlaying && navigations === navBefore ? '' : `the page reloaded or left play during live play (${navigations - navBefore} navigations)`, checks, log);
-    // the player's way out: Pause (a real tap on the HUD button, P on desktop), then Levels
-    const pauseAt = await page.eval(`(() => { const b = document.querySelector('[aria-label="Pause"], .hud .pause, button.pause'); if (!b) return null; const r = b.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()`);
-    if (pauseAt) await (device.touch ? tap(page, pauseAt[0], pauseAt[1]) : click(page, pauseAt[0], pauseAt[1]));
-    else await page.eval(`window.__kiln.pause('user')`);
-    await page.waitFor(`window.__kiln.ui.current === 'pause'`, { timeoutMs: 5000 }).catch(() => {});
-    await sleep(300);
-    const levelsAt = await centerOfText(page, '^Levels');
-    if (levelsAt) await (device.touch ? tap(page, levelsAt[0], levelsAt[1]) : click(page, levelsAt[0], levelsAt[1]));
-    else await page.eval(`window.__kiln.showMap()`);
-    const reloadedAt = Date.now();
-    const reloaded = await page.waitFor(`window.__qaMark === undefined && !!(${BOOTED})`, { timeoutMs: 8000 }).catch(() => false);
-    let toast = '';
-    if (reloaded) {
-      toast = await page.waitFor(`(() => { const t = document.querySelector('.toast.in'); return t && t.textContent.trim(); })()`, { timeoutMs: 5000, everyMs: 50 }).catch(() => '');
-    }
-    notes.toastAfterMs = toast ? Date.now() - reloadedAt : null;
-    judge('reload-at-safe-point', reloaded ? '' : `no reload within 8 s of reaching the level map (pause found ${!!pauseAt}, Levels found ${!!levelsAt})`, checks, log);
-    judge('updated-toast', toast === 'Updated' ? '' : `toast "${toast}" after the reload`, checks, log);
-    cacheMap = await page.eval(CACHES);
-    const coreNames = Object.keys(cacheMap).filter((n) => n.startsWith('kiln-core-'));
-    judge('old-cache-dropped', coreNames.join(',') === 'kiln-core-qa-2' ? '' : `core caches now: ${coreNames.join(', ') || 'none'}`, checks, log);
-    // "Updated" is said once: a second reload is quiet
-    await page.eval(`window.__qaMark = 2; location.reload(); true`).catch(() => {});
-    await sleep(500);
-    await page.waitFor(BOOTED, { timeoutMs: 20000 }).catch(() => {});
-    const again = await page.waitFor(`(() => { const t = document.querySelector('.toast.in'); return t && t.textContent.trim(); })()`, { timeoutMs: 2500, everyMs: 50 }).catch(() => '');
-    judge('updated-once', again === 'Updated' ? 'the "Updated" toast came back on the next reload' : '', checks, log);
+    await exerciseUpgrade(page, 'returning-visit', 'qa-2');
     judge('errors-update', [...new Set([...upd.errors, ...upd.network])].slice(0, 6).join(' | '), checks, log);
-    notes.live = live;
   } catch (err) {
     judge('run', err.message, checks, log);
   } finally {

@@ -12,7 +12,7 @@ import * as THREE from 'three';
 import { FIELD } from '../core/constants.js';
 import { LOOK } from './look.js';
 import { FIT } from './fit.js';
-import { PAL } from './materials.js';
+import { PAL_VEC3 } from './materials.js';
 import { FIRE_VERT, FIRE_FRAG, SPARK_VERT, SPARK_FRAG } from './shaders.js';
 
 /** A fire ShaderMaterial for the kiln mouth. */
@@ -32,8 +32,8 @@ export function fireMaterial(opts = {}) {
       uTip: { value: 0.55 },
       uFlow: { value: 0 },
       uHot: { value: 0 },
-      uHeatLo: { value: opts.heatLo ?? PAL.heatLo },
-      uHeatHi: { value: opts.heatHi ?? PAL.heatHi },
+      uHeatLo: { value: opts.heatLo ?? PAL_VEC3.heatLo },
+      uHeatHi: { value: opts.heatHi ?? PAL_VEC3.heatHi },
       // legibility (ART 12b), written per frame by setLegibility()
       uClipY: { value: 1e5 },
       uFlareClipY: { value: 1e5 },
@@ -106,7 +106,7 @@ export function createFire(scene) {
     blending: THREE.AdditiveBlending,
     uniforms: {
       uTime: { value: 0 }, uScale: { value: 1 }, uWidth: { value: 700 }, uHeight: { value: 980 }, uFlare: { value: 0 },
-      uHeatLo: { value: PAL.heatLo }, uHeatHi: { value: PAL.heatHi },
+      uHeatLo: { value: PAL_VEC3.heatLo }, uHeatHi: { value: PAL_VEC3.heatHi },
     },
     vertexShader: SPARK_VERT,
     fragmentShader: SPARK_FRAG,

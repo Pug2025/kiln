@@ -53,6 +53,16 @@ test('title (ART 15.6 D2): desktop wall panel with one primary Continue; phones 
   } finally { p.done(); }
 });
 
+test('title: an asynchronously sized wall keeps fallback art until its first draw', () => {
+  let disposed = 0;
+  const t = buildTitle(true, { mountWall: () => ({ ready: false, dispose() { disposed++; } }) });
+  try {
+    assert.equal(t.el.querySelector('.wall').classList.contains('live'), false);
+    assert.ok(t.el.querySelector('.wall-art'));
+  } finally { t.done(); }
+  assert.equal(disposed, 1, 'leaving title disposes the wall');
+});
+
 const navStub = () => ({ count: 0, add() { this.count++; } });
 
 function build(data, opts = {}) {

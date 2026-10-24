@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Kiln QA (G): iOS Simulator helper for the phone checks (brief G task 4). Uses only Xcode's
 # simctl: boots an iPhone simulator, opens the game in Safari, waits, saves screenshots. The
-# interactive part (drag, Add to Home Screen, offline relaunch) is done through the iOS Simulator
-# MCP tool; this script makes the before/after evidence repeatable.
+# interactive part (drag, Add to Home Screen, offline relaunch) needs a native iOS UI automation
+# runner such as XCTest; simctl openurl/screenshots alone do not prove those actions.
 #
 #   tools/qa/ios-sim.sh list                                  iPhones installed on this Mac
 #   tools/qa/ios-sim.sh open  [device] [url]                  boot + open url (default http://localhost:8790/?mute=1)
@@ -80,24 +80,34 @@ case "$cmd" in
   mem)
     # Simulator processes are Mac processes whose binaries live under CoreSimulator; Safari's page
     # runs in com.apple.WebKit.WebContent, its WebGL and media in com.apple.WebKit.GPU.
-    secs="${1:-0}"; peak=0; t=0
+    secs="${1:-0}"; peak=0; peakrss=0; missingfp=0; t=0
     while :; do
       pids="$(ps -axo pid=,command= | grep -E 'CoreSimulator.*com\.apple\.WebKit\.(WebContent|GPU)' | grep -v grep | awk '{print $1}' || true)"
       [ -n "$pids" ] || { echo "no simulator WebKit process (open the game first: ios-sim.sh open)" >&2; exit 1; }
-      total=0
+      total=0; totalrss=0
       for p in $pids; do
         name="$(ps -o command= -p "$p" | sed -n 's/.*com\.apple\.WebKit\.\([A-Za-z]*\).*/\1/p' | head -1)"
-        fp="$(footprint -f bytes --pid "$p" 2>/dev/null | sed -n 's/.*Footprint: *\([0-9][0-9]*\) B.*/\1/p' | head -1)"
+        fp="$(footprint -f bytes --pid "$p" 2>/dev/null | sed -n 's/.*Footprint: *\([0-9][0-9]*\) B.*/\1/p' | head -1 || true)"
         rss="$(ps -o rss= -p "$p" | tr -d ' ')"
-        fpmb=$(( ${fp:-0} / 1048576 )); rssmb=$(( ${rss:-0} / 1024 ))
-        total=$(( total + fpmb ))
+        rssmb=$(( ${rss:-0} / 1024 )); totalrss=$(( totalrss + rssmb ))
+        if [ -n "$fp" ]; then
+          fpmb=$(( fp / 1048576 )); total=$(( total + fpmb ))
+        else
+          fpmb="UNAVAILABLE"; missingfp=1
+        fi
         printf '%s  %-10s pid %-6s footprint %5s MB  resident %5s MB\n' "$(date +%H:%M:%S)" "$name" "$p" "$fpmb" "$rssmb"
       done
       [ "$total" -gt "$peak" ] && peak=$total
+      [ "$totalrss" -gt "$peakrss" ] && peakrss=$totalrss
       t=$(( t + 2 ))
       [ "$t" -gt "$secs" ] && break
       sleep 2
     done
-    echo "peak WebKit footprint (all processes): $peak MB" ;;
+    if [ "$missingfp" -eq 0 ]; then
+      echo "peak simulator WebKit footprint (all processes): $peak MB"
+    else
+      echo "simulator WebKit physical footprint: UNAVAILABLE for one or more samples"
+    fi
+    echo "peak simulator WebKit resident memory (all processes, includes shared pages): $peakrss MB" ;;
   *) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//' ;;
 esac

@@ -18,8 +18,12 @@
 // elsewhere) keeps a static heat gradient for its exit fade, never a dark hole.
 
 import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { COLOR } from '../core/constants.js';
 import { NOISE, PLAIN_VERT, withOutput } from './shaders.js';
+import { createMaterials } from './materials.js';
+import { makeEnvironment } from './kiln.js';
+import { LOOK } from './look.js';
 
 const FLAME_FRAG = withOutput(`
   precision highp float; varying vec2 vUv;
@@ -173,4 +177,230 @@ export function createWordmarkFlame(host, opts = {}) {
 /** QA: how many flame renderers this session made (0 or 1) and which slot holds the canvas. */
 export function wordmarkFlameInfo() {
   return { renderers: shared && !shared.failed ? 1 : 0, mounted: !!(shared && shared.owner), host: shared ? shared.host : null };
+}
+
+// ART 15 C16: a real, fixed 5 by 6 brick wall. Its two instanced meshes use the game's exact
+// rounded slabs, heated ceramic and smoked glass. Keep one renderer for the session, just like
+// the I flame: title round trips must never consume another browser WebGL slot.
+const WALL_COLS = 5, WALL_ROWS = 6, WALL_COUNT = WALL_COLS * WALL_ROWS;
+const WALL_TURN = 8 * Math.PI / 180;
+const WALL_FRAME_MS = 1000 / 30;
+let titleWall = null;
+let titleWallFailed = false;
+let activeTitleWall = null;
+
+function sharedTitleWall() {
+  if (titleWall) return titleWall;
+  if (titleWallFailed) return null;
+  const canvas = document.createElement('canvas');
+  canvas.className = 'kiln-title-wall';
+  Object.assign(canvas.style, { position: 'absolute', inset: '0', width: '100%', height: '100%', display: 'block', pointerEvents: 'none' });
+  let gl;
+  try {
+    gl = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true, powerPreference: 'low-power' });
+  } catch {
+    titleWallFailed = true;
+    return null; // title.js keeps the level-card fallback visible
+  }
+  gl.setClearColor(0x000000, 0);
+  gl.outputColorSpace = THREE.SRGBColorSpace;
+  gl.toneMapping = THREE.ACESFilmicToneMapping;
+  gl.toneMappingExposure = LOOK.EXPOSURE;
+
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(30, 1, 1, 2000);
+  camera.position.set(0, 30, 620);
+  camera.lookAt(0, 0, 0);
+  const M = createMaterials(gl);
+  // This small scene needs only the two brick materials and their low-resolution procedural
+  // crackle maps. Drop unused material/texture resources before anything reaches the GPU.
+  for (const [key, mat] of Object.entries(M)) if (key !== 'tex' && key !== 'shell' && key !== 'core') mat.dispose();
+  M.tex.brushed.dispose();
+  M.tex.glow.dispose();
+  M.tex.neutralMap?.dispose();
+  M.tex.neutralNormal?.dispose();
+  // The arena's last-life palette is mutable. The title always uses its resting heat colours.
+  M.core.userData.u.uHeatLo.value = new THREE.Color(COLOR.HEAT_LO);
+  M.core.userData.u.uHeatHi.value = new THREE.Color(COLOR.HEAT_HI);
+  scene.environment = makeEnvironment(gl);
+
+  const root = new THREE.Group();
+  root.name = 'title-wall';
+  root.rotation.x = -0.10;
+  scene.add(root);
+  const S = LOOK.SHELL, C = LOOK.CORE;
+  const coreGeo = new RoundedBoxGeometry(C.w, C.h, C.d, C.seg, C.r);
+  const heat = new THREE.InstancedBufferAttribute(new Float32Array(WALL_COUNT), 1);
+  coreGeo.setAttribute('aHeat', heat);
+  const core = new THREE.InstancedMesh(coreGeo, M.core, WALL_COUNT);
+  const shell = new THREE.InstancedMesh(new RoundedBoxGeometry(S.w, S.h, S.d, S.seg, S.r), M.shell, WALL_COUNT);
+  core.frustumCulled = shell.frustumCulled = false;
+  shell.renderOrder = 5;
+  const matrix = new THREE.Matrix4();
+  for (let row = 0; row < WALL_ROWS; row++) for (let col = 0; col < WALL_COLS; col++) {
+    const i = row * WALL_COLS + col;
+    matrix.makeTranslation((col - 2) * 60, (2.5 - row) * 30, 0);
+    core.setMatrixAt(i, matrix);
+    shell.setMatrixAt(i, matrix);
+    // Heat gathers at the foot and in the centre, with a few cooler cells breaking up the grid.
+    heat.array[i] = 0.16 + row * 0.10 + (2 - Math.abs(col - 2)) * 0.12 + ((row + col * 2) % 4) * 0.035;
+  }
+  root.add(core, shell);
+  const hemi = new THREE.HemisphereLight(0x2c3440, 0x2a1408, 0.4);
+  const key = new THREE.DirectionalLight(0xd6dfeb, 1.5);
+  key.position.set(-260, 760, 900);
+  const rim = new THREE.DirectionalLight(0x9fc4d8, 0.7);
+  rim.position.set(240, 520, -700);
+  const fire = new THREE.PointLight(0xff7a1a, 70000, 1250, 2);
+  fire.position.set(0, -260, 120);
+  scene.add(hemi, key, rim, fire);
+  titleWall = { gl, canvas, scene, camera, root, owner: null, host: null, lost: false, draws: 0 };
+  // Listeners belong to the single persistent canvas. A lost decorative context exposes the
+  // existing image; only a restored, successfully drawn frame hides it again.
+  canvas.addEventListener('webglcontextlost', (e) => {
+    e.preventDefault();
+    titleWall.lost = true;
+    if (titleWall.owner) titleWall.owner.suspend();
+  });
+  canvas.addEventListener('webglcontextrestored', () => {
+    titleWall.lost = false;
+    // PMREM's GPU target is not recreated by three.js after a context restore.
+    scene.environment.dispose();
+    scene.environment = makeEnvironment(gl);
+    if (titleWall.owner) titleWall.owner.resize();
+  });
+  return titleWall;
+}
+
+/**
+ * A decorative wall with one active owner. Reduced motion draws one still; hidden/zero-sized
+ * walls do no work. dispose() stops its clock, releases observers and detaches/shrinks the canvas.
+ * @param {HTMLElement} host
+ * @param {{reduceMotion?:boolean|(()=>boolean), onActive?:(active:boolean)=>void}} [opts]
+ * @returns {null | {ready:boolean, resize():void, dispose():void}}
+ */
+export function createTitleWall(host, opts = {}) {
+  if (activeTitleWall) activeTitleWall.dispose();
+  let S = titleWall;
+  let disposed = false, raf = 0, width = 0, height = 0, start = null, lastDraw = null;
+  const mq = typeof window.matchMedia === 'function' ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+  const reducedNow = () => typeof opts.reduceMotion === 'function'
+    ? !!opts.reduceMotion() : !!opts.reduceMotion || !!(mq && mq.matches);
+  let reduced = reducedNow();
+  let reportedActive = false;
+  const activity = (active) => {
+    if (reportedActive === active) return;
+    reportedActive = active;
+    if (opts.onActive) opts.onActive(active);
+  };
+  const stop = () => { if (raf) cancelAnimationFrame(raf); raf = 0; };
+  const canDraw = () => !disposed && activeTitleWall === handle && S && S.owner === handle && !S.lost && !document.hidden && width > 0 && height > 0;
+  const draw = (now) => {
+    raf = 0;
+    if (!canDraw()) return;
+    // The wall moves at most 0.14 degrees in 1/30 second. Keep its slow drift smooth while
+    // avoiding a second scene draw on every game frame. Retain the interval remainder so
+    // small timestamp rounding never turns a 30 Hz target into an accidental 20 Hz cadence.
+    if (!reduced && lastDraw !== null) {
+      const intervals = Math.floor((now - lastDraw + 0.5) / WALL_FRAME_MS);
+      if (intervals < 1) { raf = requestAnimationFrame(draw); return; }
+      lastDraw += intervals * WALL_FRAME_MS;
+    } else lastDraw = now;
+    if (start === null) start = now;
+    // A full excursion from -8 to +8 degrees and back takes 12 seconds. The bounded clock
+    // repeats exactly after 600 seconds, preserving precision on a title left open overnight.
+    const t = ((now - start) / 1000) % 600;
+    S.root.rotation.y = reduced ? 0 : Math.sin(t * Math.PI / 6) * WALL_TURN;
+    S.gl.render(S.scene, S.camera);
+    S.draws++;
+    if (!handle.ready) {
+      handle.ready = true;
+      host.classList.add('live');
+      activity(!reduced);
+    }
+    if (!reduced) raf = requestAnimationFrame(draw);
+  };
+  const handle = {
+    // title.js leaves the fallback image visible until the first successful draw.
+    ready: false,
+    resize() {
+      if (disposed || activeTitleWall !== handle) return;
+      // Mount happens before title.js is attached. ResizeObserver supplies the first real size.
+      width = host.clientWidth;
+      height = host.clientHeight;
+      stop();
+      lastDraw = null;
+      if (document.hidden || width <= 0 || height <= 0) { handle.suspend(); return; }
+      // A short phone hides this decoration. Do not create a context or upload its resources
+      // until there is actually room for it; the menu and existing fallback need no renderer.
+      if (!S) S = sharedTitleWall();
+      if (!S) return;
+      S.owner = handle;
+      S.host = host;
+      if (S.canvas.parentNode !== host) host.appendChild(S.canvas);
+      if (!canDraw()) return;
+      // Native CSS resolution is enough for the slow, large slabs; MSAA keeps their bevels
+      // smooth without paying the 2.25x fragment load of a 1.5 DPR decorative canvas.
+      S.gl.setPixelRatio(Math.min(1, window.devicePixelRatio || 1));
+      S.gl.setSize(width, height, false);
+      S.camera.aspect = width / height;
+      // Fit the full wall at either 8-degree extreme without reading layout in the hot loop.
+      const fit = Math.max(190, 320 / S.camera.aspect);
+      S.camera.position.z = fit / (2 * Math.tan(Math.PI / 12)) / 0.83;
+      S.camera.lookAt(0, 0, 0);
+      S.camera.updateProjectionMatrix();
+      raf = requestAnimationFrame(draw);
+    },
+    suspend() {
+      stop();
+      activity(false);
+      handle.ready = false;
+      host.classList.remove('live');
+    },
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      activity(false);
+      handle.ready = false;
+      stop();
+      if (ro) ro.disconnect();
+      document.removeEventListener('visibilitychange', visibility);
+      window.removeEventListener('resize', handle.resize);
+      if (mq && mq.removeEventListener) mq.removeEventListener('change', motion);
+      host.classList.remove('live');
+      if (activeTitleWall === handle) activeTitleWall = null;
+      if (!S || S.owner !== handle) return;
+      S.canvas.remove();
+      S.gl.setSize(1, 1, false);
+      S.owner = null;
+      S.host = null;
+    },
+  };
+  const visibility = () => document.hidden ? handle.suspend() : handle.resize();
+  const motion = () => {
+    const next = reducedNow();
+    if (next === reduced) return;
+    reduced = next;
+    handle.suspend();
+    handle.resize();
+  };
+  const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(handle.resize) : null;
+  activeTitleWall = handle;
+  if (ro) ro.observe(host);
+  document.addEventListener('visibilitychange', visibility);
+  window.addEventListener('resize', handle.resize);
+  if (mq && mq.addEventListener) mq.addEventListener('change', motion);
+  handle.resize();
+  if (titleWallFailed) { handle.dispose(); return null; }
+  return handle;
+}
+
+/** QA: resource counts and pose; `internals` exposes the renderer for timer-query witnesses. */
+export function titleWallInfo(internals = false) {
+  const S = titleWall;
+  if (internals) return S;
+  return { renderers: S ? 1 : 0, mounted: !!(S && S.owner), host: S ? S.host : null,
+    bricks: S ? WALL_COUNT : 0, draws: S ? S.draws : 0, rotation: S ? S.root.rotation.y : 0,
+    geometries: S ? S.gl.info.memory.geometries : 0, textures: S ? S.gl.info.memory.textures : 0,
+    programs: S ? S.gl.info.programs.length : 0 };
 }

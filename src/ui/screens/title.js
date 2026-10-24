@@ -67,7 +67,9 @@ export function title(data, { el, nav }) {
   const mountWall = (fn) => {
     if (wall || !fn) return;
     wall = fn(wallBox);
-    if (wall) wallBox.classList.add('live');
+    // A renderer mounted into this still-detached screen may need its first measured size.
+    // Keep the art until it reports readiness; older synchronous wall adapters remain valid.
+    if (wall && wall.ready !== false) wallBox.classList.add('live');
   };
   mount(data.mountFlame);
   mountWall(data.mountWall);

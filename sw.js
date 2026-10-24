@@ -11,7 +11,7 @@
 //   kiln-runtime-v1    three.js from jsDelivr and Google Fonts (CSS and font files), cache-first
 // Navigation always answers with the cached index.html (query strings such as ?level are ignored).
 
-const BUILD = '2026-10-23T2038Z-c60575d';
+const BUILD = '2026-10-24T0620Z-5c4160b';
 const CORE = `kiln-core-${BUILD}`;
 const RUNTIME = 'kiln-runtime-v1';
 const CDN = /^https:\/\/(cdn\.jsdelivr\.net\/npm\/three@0\.160\.0\/|fonts\.googleapis\.com\/|fonts\.gstatic\.com\/)/;
@@ -150,6 +150,7 @@ const FILES = [
   'src/render/materials.js',
   'src/render/overlays.js',
   'src/render/pace.js',
+  'src/render/palette-uniforms.js',
   'src/render/phone-marks.js',
   'src/render/pieces.js',
   'src/render/post.js',
@@ -198,17 +199,29 @@ const FILES = [
 // FILES:END
 
 async function addAll(cache, list) {
-  // one by one: a missing file must not stop the rest from going offline
-  await Promise.allSettled(list.map(async (f) => {
+  // Keep the working worker and its cache when any required file is unavailable. A partial
+  // install must not activate and delete the player's complete offline build.
+  const writes = await Promise.allSettled(list.map(async (f) => {
     const res = await fetch(f, { cache: 'reload' });
-    if (res.ok) await cache.put(f, res);
+    if (!res.ok) throw new Error(`Cannot cache ${f}: ${res.status}`);
+    await cache.put(f, res);
   }));
+  const failed = writes.find((r) => r.status === 'rejected');
+  if (failed) throw failed.reason;
 }
 
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
+    const existed = await caches.has(CORE);
     const cache = await caches.open(CORE);
-    await addAll(cache, ['./', ...FILES.filter((f) => !lazy(f))]);
+    try {
+      await addAll(cache, ['./', ...FILES.filter((f) => !lazy(f))]);
+    } catch (err) {
+      // All writes have settled before cleanup. Never delete an already-existing cache when a
+      // local ?sw=1 edit deliberately reuses its BUILD stamp.
+      if (!existed) await caches.delete(CORE);
+      throw err;
+    }
     await self.skipWaiting();
   })());
 });

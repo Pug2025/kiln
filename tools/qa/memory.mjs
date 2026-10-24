@@ -24,6 +24,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { launchChrome, serveStatic } from './lib/cdp.mjs';
 import { getDevice, emulateDevice } from './lib/devices.mjs';
+import { trackFor } from '../../src/audio/music.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -96,7 +97,7 @@ function rss(pids) {
 const AUDIO = `(() => {
   const a = window.__kiln && window.__kiln.audio && window.__kiln.audio.state;
   if (!a) return null;
-  return { context: a.context, unlocked: a.unlocked, track: a.track, decoded: a.decoded, decodedBytes: a.decodedBytes ?? null };
+  return { context: a.context, unlocked: a.unlocked, track: a.track, source: a.source, decoded: a.decoded, decodedBytes: a.decodedBytes ?? null, streaming: !!a.streaming };
 })()`;
 
 async function main() {
@@ -148,13 +149,14 @@ async function main() {
     for (const type of o.audio ? ['touchStart', 'touchEnd'] : []) {
       await page.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x: 4, y: 4 }] });
     }
-    console.log(`Kiln memory walk: ${o.walk.join(' > ')}, ${o.dwell} s each, ${device.name} ${device.width}x${device.height}, ${chrome.version} headless`);
+    console.log(`Kiln memory walk: ${o.walk.join(' > ')}, ${o.dwell} s each, ${device.name} ${device.width}x${device.height}, ${chrome.version} ${o.headed ? 'headed' : 'headless'}`);
+    console.log('Chrome phone emulation; Safari/iPhone memory is a separate device check.');
     console.log(`empty page first: renderer ${baseline.rendererMB} MB, GPU ${baseline.gpuMB} MB\n`);
     let kind = '';
     for (const step of o.walk) {
       const call = step === 'title' ? 'window.__kiln.showTitle()' : `window.__kiln.startLevel(${Number(step)})`;
       await page.eval(`(() => { ${call}; return true; })()`);
-      const s = { step, track: null, decoded: 0, decodedBytes: null, rendererMB: 0, gpuMB: 0, heapMB: 0, level: null, context: null };
+      const s = { step, expectedTrack: step === 'title' ? 'title' : trackFor({ n: Number(step) }), track: null, decoded: 0, decodedBytes: null, rendererMB: 0, gpuMB: 0, heapMB: 0, level: null, context: null };
       const until = Date.now() + o.dwell * 1000;
       while (Date.now() < until) {
         await sleep(500);
@@ -173,19 +175,25 @@ async function main() {
         if (a) {
           s.track = a.track || s.track;
           s.context = a.context;
+          s.source = a.source;
           s.decoded = Math.max(s.decoded, a.decoded || 0);
+          s.decodedEnd = a.decoded || 0;
+          s.streaming = a.streaming;
           if (a.decodedBytes != null) s.decodedBytes = Math.max(s.decodedBytes || 0, a.decodedBytes);
         }
       }
-      s.level = await page.eval('window.__kiln.world && window.__kiln.world.level ? window.__kiln.world.level.n : null').catch(() => null);
+      s.level = await page.eval('window.__kiln.world && window.__kiln.world.level ? window.__kiln.world.level.def.n : null').catch(() => null);
       steps.push(s);
       const dec = s.decodedBytes != null ? `, decoded ${r1(s.decodedBytes / MB)} MB` : '';
-      console.log(`${step.padEnd(6)} track ${String(s.track).padEnd(12)} files held decoded ${s.decoded}${dec} | renderer peak ${s.rendererMB} MB (end ${s.rendererEndMB}), GPU ${s.gpuMB} MB, JS heap ${s.heapMB} MB (audio ${s.context})`);
+      console.log(`${step.padEnd(6)} track ${String(s.track).padEnd(12)} files held decoded ${s.decoded}${dec}, source ${s.source}, streaming ${!!s.streaming} | renderer peak ${s.rendererMB} MB (end ${s.rendererEndMB}), GPU ${s.gpuMB} MB, JS heap ${s.heapMB} MB (audio ${s.context})`);
     }
     const peak = steps.reduce((m, s) => (s.rendererMB > m.rendererMB ? s : m), steps[0]);
     console.log(`\npeak renderer ${peak.rendererMB} MB at "${peak.step}" (GPU process peak ${Math.max(...steps.map((s) => s.gpuMB))} MB; ${kind === 'footprint' ? 'physical footprint, macOS footprint' : 'resident memory, ps (counts shared pages)'})`);
     if (steps.every((s) => s.decodedBytes == null)) console.log('decoded music bytes: not exposed by window.__kiln.audio.state (decodedBytes); the renderer figure includes them');
-    if (steps.some((s) => s.context !== 'running')) console.log('note: the AudioContext was not running for some steps, so their music was not decoded');
+    if (o.audio && steps.some((s) => s.context !== 'running' || s.track !== s.expectedTrack || (s.source !== 'file' && !s.streaming))) {
+      console.log('FAIL: some audio-enabled steps ended without a running AudioContext and the expected loaded music');
+      failed = true;
+    }
     if (errors.length) {
       console.log(`page errors (${errors.length}):\n  ${[...new Set(errors)].slice(0, 8).join('\n  ')}`);
       failed = true;
@@ -201,7 +209,7 @@ async function main() {
     await chrome.close();
     if (server) await server.close();
   }
-  if (o.json) writeFileSync(o.json, JSON.stringify({ device: o.device, walk: o.walk, dwell: o.dwell, audio: o.audio, baseline, steps, errors }, null, 2));
+  if (o.json) writeFileSync(o.json, JSON.stringify({ engine: 'Chrome', emulated: true, device: o.device, walk: o.walk, dwell: o.dwell, audio: o.audio, baseline, steps, errors }, null, 2));
   console.log(failed ? 'RESULT: FAIL' : 'RESULT: PASS');
   return failed ? 1 : 0;
 }

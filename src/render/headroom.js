@@ -16,7 +16,7 @@
 
 import * as THREE from 'three';
 import { FIELD } from '../core/constants.js';
-import { PAL } from './materials.js';
+import { PAL_VEC3 } from './materials.js';
 import { LOOK } from './look.js';
 import { NOISE, withOutput } from './shaders.js';
 import { screenToPlane, projectWorld } from './fit.js';
@@ -308,7 +308,7 @@ export function createHeadroom(scene) {
       uGraded: { value: 0 }, uGlowGain: { value: 0.36 }, uBodyGain: { value: 1 },
       uQuietBody: { value: 1 }, uQuietEmit: { value: 1 }, uBox: { value: new THREE.Vector4(0, 0, 0, 0) },
       uHud: { value: new THREE.Vector2(1e5, 0) }, uGut: { value: new THREE.Vector2(1e5, 1) },
-      uHeatLo: { value: PAL.heatLo }, uHeatHi: { value: PAL.heatHi },
+      uHeatLo: { value: PAL_VEC3.heatLo }, uHeatHi: { value: PAL_VEC3.heatHi },
     },
     vertexShader: VERT,
     fragmentShader: PLATE_FRAG,
@@ -320,7 +320,7 @@ export function createHeadroom(scene) {
     blendSrc: THREE.OneFactor,
     blendDst: THREE.OneMinusSrcAlphaFactor,
     uniforms: {
-      uMid: { value: blank }, uFire: { value: 0.5 }, uBoss: { value: 0 }, uHeatLo: { value: PAL.heatLo },
+      uMid: { value: blank }, uFire: { value: 0.5 }, uBoss: { value: 0 }, uHeatLo: { value: PAL_VEC3.heatLo },
       uWallY: { value: 0.3 }, uCrop: { value: new THREE.Vector4(0, 0, 1, 1) },
       uPivot: { value: new THREE.Vector2(0.5, 0.5) }, uShift: { value: new THREE.Vector2(0, 0) },
       uRot: { value: 0 }, uScale: { value: 1 }, uFade: { value: 0.85 }, uGain: { value: 0.26 }, uTint: { value: 1 },

@@ -25,7 +25,7 @@ import { FIELD, RING } from '../core/constants.js';
 import { EV, PHASE_CODE } from '../core/events.js';
 import { createReader, resetReader, next } from '../core/bus.js';
 import { LOOK } from './look.js';
-import { PAL, createMaterials } from './materials.js';
+import { PAL, createMaterials, syncPaletteUniforms, unifyStandardMaterials } from './materials.js';
 import { makeEnvironment, createKiln } from './kiln.js';
 import { createFire } from './fire.js';
 import { createBricks } from './bricks.js';
@@ -171,6 +171,7 @@ export async function createRenderer(host, opts = {}) {
   let esc = 0; // last-life escalation 0..1
   let menuOn = false;
   let menuSkip = 0;
+  let menuStride = 3;
   const restCam = createPose();
   const padA = new THREE.Vector3(), padB = new THREE.Vector3();
   const projA = new THREE.Vector3(), projB = new THREE.Vector3();
@@ -367,6 +368,7 @@ export async function createRenderer(host, opts = {}) {
    * break, drop or boss never stalls a frame on a shader compile.
    */
   function warmUp() {
+    unifyStandardMaterials(scene, M.tex);
     const hidden = [];
     scene.traverse((o) => {
       if (!o.visible) {
@@ -375,6 +377,8 @@ export async function createRenderer(host, opts = {}) {
       }
     });
     try {
+      gl.initTexture(M.tex.neutralMap);
+      gl.initTexture(M.tex.neutralNormal);
       actors.warmTextures(gl);
       // both output paths: straight to the canvas (lite: ACES + sRGB in each shader) and into the
       // composer's target (bloom: linear, no tone mapping). three compiles a separate program for
@@ -542,6 +546,7 @@ export async function createRenderer(host, opts = {}) {
       esc += Math.sign(tgt - esc) * Math.min(Math.abs(tgt - esc), dt / LOOK.ESCALATE_S);
       if (esc !== prevEsc) {
         PAL.heatLo.copy(PAL.heatLoRest).lerp(lastLifeColor, esc);
+        syncPaletteUniforms();
         vignette.style.opacity = String(LOOK.VIGNETTE + (LOOK.VIGNETTE_LAST - LOOK.VIGNETTE) * esc);
         post.setSaturation(1 - LOOK.DESAT_LAST * esc);
         if (post.direct && Math.abs(esc - prevEsc) > 0.02) applyMenu();
@@ -570,9 +575,9 @@ export async function createRenderer(host, opts = {}) {
       rig.update(t, dt, leadX(w), w.fx);
       bloomMask(w);
 
-      // under a menu the canvas sits behind a 40 px blur: draw every third frame there (C call),
-      // which spares phones the full scene plus the blur filter at 60 fps
-      menuSkip = menuOn ? (menuSkip + 1) % 3 : 0;
+      // Under a menu the canvas sits behind a 40 px blur: draw every third frame there, or
+      // every sixth while the visible title wall is moving. Gameplay still draws every frame.
+      menuSkip = menuOn ? (menuSkip + 1) % menuStride : 0;
       if (menuSkip !== 0 || glWatch.lost) {
         stats.frameMs = performance.now() - now;
         paceFrame(stats.frameMs);
@@ -649,6 +654,14 @@ export async function createRenderer(host, opts = {}) {
     setMenu(on) {
       menuOn = !!on;
       applyMenu();
+    },
+
+    /** The moving title wall pays for its draw by sampling the blurred attract world at 10 Hz. */
+    setMenuDrawStride(stride = 3) {
+      const next = stride === 6 ? 6 : 3;
+      if (menuStride === next) return;
+      menuStride = next;
+      menuSkip = 0;
     },
 
     screenToField(clientX, clientY, out) {

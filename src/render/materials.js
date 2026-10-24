@@ -7,10 +7,11 @@
 
 import * as THREE from 'three';
 import { COLOR } from '../core/constants.js';
+import { colorVec3, writeColorVec3 } from './palette-uniforms.js';
 
 // ---------------------------------------------------------------- palette (shared Color objects)
 // HEAT_LO is mutable: the last-life escalation shifts it toward #F36123 and every material that
-// holds this object follows (uniforms keep the reference).
+// holds this object follows. App-owned shader uniforms share the flat buffers below.
 export const PAL = {
   base: new THREE.Color(COLOR.WORLD_BASE),
   graphite: new THREE.Color(COLOR.WORLD_GRAPHITE),
@@ -21,6 +22,65 @@ export const PAL = {
   warn: new THREE.Color(COLOR.WARN),
   heatLoRest: new THREE.Color(COLOR.HEAT_LO),
 };
+
+// Shared with PAL across renderer instances; creating another renderer never resets either.
+export const PAL_VEC3 = {
+  base: colorVec3(PAL.base),
+  graphite: colorVec3(PAL.graphite),
+  heatLo: colorVec3(PAL.heatLo),
+  heatHi: colorVec3(PAL.heatHi),
+};
+
+/** Call immediately after changing PAL.heatLo so every shader sees the same transition. */
+export function syncPaletteUniforms() {
+  writeColorVec3(PAL_VEC3.heatLo, PAL.heatLo);
+}
+
+/** Two renderer-owned samplers let opaque standard materials share map/normal shader features. */
+export function createNeutralTextures() {
+  const neutralMap = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1);
+  neutralMap.name = 'kiln-neutral-white';
+  neutralMap.colorSpace = THREE.SRGBColorSpace;
+  const neutralNormal = new THREE.DataTexture(new Uint8Array([128, 128, 255, 255]), 1, 1);
+  neutralNormal.name = 'kiln-neutral-normal';
+  neutralNormal.colorSpace = THREE.NoColorSpace;
+  for (const texture of [neutralMap, neutralNormal]) {
+    texture.minFilter = texture.magFilter = THREE.NearestFilter;
+    texture.generateMipmaps = false;
+    texture.needsUpdate = true;
+  }
+  return { neutralMap, neutralNormal };
+}
+
+/** Preserve real textures and material values; a zero tangent perturbation keeps the old normal. */
+export function unifyStandardMaterial(material, tex) {
+  if (!material?.isMeshStandardMaterial || material.isMeshPhysicalMaterial || material.transparent) return false;
+  // Custom shaders have their own keys, so extra features cannot merge them with ordinary
+  // standards. Leave their existing samplers alone; late clones can still inherit base fallbacks.
+  if (material.onBeforeCompile !== THREE.Material.prototype.onBeforeCompile) return false;
+  let changed = false;
+  if (!material.map) {
+    material.map = tex.neutralMap;
+    changed = true;
+  }
+  // A normal map would replace bump mapping, and object-space normals ignore normalScale.
+  if (!material.normalMap && !material.bumpMap && material.normalMapType === THREE.TangentSpaceNormalMap) {
+    material.normalMap = tex.neutralNormal;
+    material.normalScale.set(0, 0);
+    changed = true;
+  }
+  if (changed) material.needsUpdate = true;
+  return changed;
+}
+
+/** Includes hidden pools and later kit models; called only before shader warm-up, never per frame. */
+export function unifyStandardMaterials(root, tex) {
+  root.traverse((o) => {
+    if (Array.isArray(o.material)) {
+      for (const material of o.material) unifyStandardMaterial(material, tex);
+    } else unifyStandardMaterial(o.material, tex);
+  });
+}
 
 // ---------------------------------------------------------------- canvas helpers
 function canvas(w, h) {
@@ -205,7 +265,7 @@ export function coreMaterial(tex, opts = {}) {
     envMapIntensity: 0.5,
   });
   const instanced = opts.instanced !== false;
-  const u = { uHeatLo: { value: PAL.heatLo }, uHeatHi: { value: PAL.heatHi }, uHeatValue: { value: opts.heat ?? 0 } };
+  const u = { uHeatLo: { value: PAL_VEC3.heatLo }, uHeatHi: { value: PAL_VEC3.heatHi }, uHeatValue: { value: opts.heat ?? 0 } };
   m.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, u);
     sh.vertexShader = sh.vertexShader
@@ -241,7 +301,9 @@ export function createMaterials(gl) {
   const glow = new THREE.CanvasTexture(glowCanvas());
   glow.colorSpace = THREE.SRGBColorSpace;
 
-  const tex = { crackle, crackleN, brushed, glow };
+  // Shared by all normalized materials/clones; material references also expose ownership to
+  // scene pruning. As with the other M.tex textures, the renderer's context owns the GPU copies.
+  const tex = { crackle, crackleN, brushed, glow, ...createNeutralTextures() };
 
   const M = {
     tex,
@@ -273,6 +335,8 @@ export function createMaterials(gl) {
   // arena frame, the kiln lips, boss parts) use these twins; the drop shells get their own glass.
   M.titaniumP = M.titanium.clone();
   M.matteP = M.matte.clone();
+  // Free-moving instanced bodies never inherit the brick wall's ceiling clipping variant.
+  M.matteFree = M.matte.clone();
   M.darkMetalP = M.darkMetal.clone();
   M.wallGlassI = glassMaterial({ aMin: 0.28, aMax: 0.9, color: 0x0e1014 });
   return M;

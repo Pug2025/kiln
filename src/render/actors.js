@@ -305,10 +305,8 @@ export function createActors(scene, M) {
   root.add(embers, streaks);
 
   // ---------------------------------------------------------------- drops (48 x 22 dark cells, lit glyph)
-  // Pickups have their own unclipped matte. The shared brick matte carries the wall's ceiling
-  // clip, whose first-use variant three's compile-only warm-up misses on an empty pickup pool.
-  const dropMatte = M.matte.clone();
-  dropMatte.clippingPlanes = null;
+  // Pickups and hazards share the unclipped pool material, separate from the brick wall.
+  const dropMatte = M.matteFree;
   M.dropMatte = dropMatte;
   const dropShell = new THREE.InstancedMesh(new RoundedBoxGeometry(48, 22, 14, 3, 4), M.wallGlassI, DROPS.MAX_LIVE);
   const dropCore = new THREE.InstancedMesh(new RoundedBoxGeometry(41, 15, 8, 2, 2.5), dropMatte, DROPS.MAX_LIVE);

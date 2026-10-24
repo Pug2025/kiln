@@ -46,17 +46,17 @@ export function createPieces(scene, M) {
   const laserGlows = inst(new THREE.PlaneGeometry(10, 34), laserGlowMat, POOL.LASERS, 8);
 
   // ---- hazards (unit radius 10, scaled by r) ----
-  const bombs = inst(new THREE.SphereGeometry(10, 18, 12), M.matte, POOL.HAZARDS);
+  const bombs = inst(new THREE.SphereGeometry(10, 18, 12), M.matteFree, POOL.HAZARDS);
   const bombRings = inst(new THREE.TorusGeometry(10.6, 0.6, 6, 32), M.warn, POOL.HAZARDS, 1);
   const slagGeo = new THREE.IcosahedronGeometry(8.5, 1);
   slagGeo.setAttribute('aHeat', new THREE.InstancedBufferAttribute(new Float32Array(POOL.HAZARDS).fill(1.05), 1));
   const slagCores = inst(slagGeo, M.core, POOL.HAZARDS);
-  const slagCrust = inst(new THREE.DodecahedronGeometry(10, 0), M.matte, POOL.HAZARDS);
+  const slagCrust = inst(new THREE.DodecahedronGeometry(10, 0), M.matteFree, POOL.HAZARDS);
   const slagRims = inst(new THREE.TorusGeometry(10.8, 0.5, 6, 32), M.warn, POOL.HAZARDS, 1);
 
   // ---- sentries (unit radius 16, scaled by r) ----
   const sentryBody = inst(new THREE.IcosahedronGeometry(12, 1), M.darkMetal, POOL.SENTRIES);
-  const sentryRing = inst(new THREE.TorusGeometry(15, 2.2, 8, 36), M.matte, POOL.SENTRIES);
+  const sentryRing = inst(new THREE.TorusGeometry(15, 2.2, 8, 36), M.matteFree, POOL.SENTRIES);
   const eyeMat = new THREE.MeshBasicMaterial({ color: PAL.heatLo.clone().multiplyScalar(1.6) });
   const sentryEye = inst(new THREE.SphereGeometry(3.2, 12, 8), eyeMat, POOL.SENTRIES, 1);
   const eyeGlowMat = new THREE.MeshBasicMaterial({

@@ -9,7 +9,7 @@
 import * as THREE from 'three';
 import { FIELD } from '../core/constants.js';
 import { LOOK } from './look.js';
-import { PAL } from './materials.js';
+import { PAL, PAL_VEC3 } from './materials.js';
 import { BURST_VERT, BURST_FRAG } from './shaders.js';
 
 const HW = FIELD.W / 2;
@@ -93,7 +93,7 @@ export function createFx(scene, M) {
   // dots LOOK.TRAIL_GAIN may cross the bloom threshold
   const burstMat = new THREE.ShaderMaterial({
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
-    uniforms: { uScale: { value: 1 }, uHeatLo: { value: PAL.heatLo }, uHeatHi: { value: PAL.heatHi } },
+    uniforms: { uScale: { value: 1 }, uHeatLo: { value: PAL_VEC3.heatLo }, uHeatHi: { value: PAL_VEC3.heatHi } },
     vertexShader: BURST_VERT,
     fragmentShader: BURST_FRAG,
   });

@@ -395,7 +395,10 @@ async function boot() {
   function mountWall(slot) {
     if (!ext || !ext.createTitleWall) return null;
     try {
-      return ext.createTitleWall(slot, { reduceMotion: reduceMotion() });
+      return ext.createTitleWall(slot, {
+        reduceMotion,
+        onActive: (active) => renderer.setMenuDrawStride(active ? 6 : 3),
+      });
     } catch (e) {
       console.warn('[kiln] title wall', e);
       return null;

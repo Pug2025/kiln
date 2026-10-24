@@ -8,7 +8,7 @@ import { test, assert } from './lib.mjs';
 
 const STUB_URL = new URL('./fixtures/C/three-stub.mjs', import.meta.url).href;
 const hooks = `export async function resolve(spec, ctx, next) {
-  if (spec === 'three') return { url: ${JSON.stringify(STUB_URL)}, shortCircuit: true };
+  if (spec === 'three' || spec === 'three/addons/geometries/RoundedBoxGeometry.js') return { url: ${JSON.stringify(STUB_URL)}, shortCircuit: true };
   return next(spec, ctx);
 }`;
 register(`data:text/javascript,${encodeURIComponent(hooks)}`);

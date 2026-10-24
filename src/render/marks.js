@@ -16,6 +16,7 @@ import * as THREE from 'three';
 import { FIELD, POOL, BRICK, BF, RING } from '../core/constants.js';
 import { LOOK } from './look.js';
 import { PAL } from './materials.js';
+import { colorVec3, writeColorVec3 } from './palette-uniforms.js';
 import { withOutput } from './shaders.js';
 import { coreProtected } from './boss-feedback.js';
 import { phoneMarkLayout, phonePipLayout, phonePipPosition, glyphInkRect, phoneTargetSegment } from './phone-marks.js';
@@ -123,7 +124,7 @@ export function createMarks(root, M) {
   const glyphMat = new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: false,
-    uniforms: { uAtlas: { value: atlas }, uColor: { value: PAL.text.clone().multiplyScalar(1.25) },
+    uniforms: { uAtlas: { value: atlas }, uColor: { value: colorVec3(PAL.text, 1.25) },
       uPhone: { value: 0 }, uInk: { value: inkBounds } },
     // clipping chunks: bricks.js clips the wall at the field's top edge (rows scrolling in)
     vertexShader: `attribute float aCell; varying vec2 vUv; varying float vCell;
@@ -349,7 +350,7 @@ export function createMarks(root, M) {
       readability.small = !!info?.small;
       readability.scale = Math.max(0.05, Number(info?.scale) || 1);
       glyphMat.uniforms.uPhone.value = readability.small ? 1 : 0;
-      glyphMat.uniforms.uColor.value.copy(PAL.text).multiplyScalar(readability.small ? 0.9 : 1.25);
+      writeColorVec3(glyphMat.uniforms.uColor.value, PAL.text, readability.small ? 0.9 : 1.25);
       glyphs.renderOrder = readability.small ? 7 : 1;
       targetGuard = null;
     },

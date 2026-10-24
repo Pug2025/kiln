@@ -5,7 +5,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { FIELD, RING, HORIZONTAL } from '../core/constants.js';
-import { PAL } from './materials.js';
+import { PAL, PAL_VEC3 } from './materials.js';
 import { LOOK } from './look.js';
 import { PLAIN_VERT, HAZE_FRAG, BACK_VERT, BACK_FRAG, SHAFT_FRAG, withOutput } from './shaders.js';
 import { CEILING_ART, ceilingLayout, isCeilingHit } from './ceiling.js';
@@ -70,7 +70,7 @@ export function createKiln(scene, M) {
 
   // ---- kiln interior (parallax layers behind the field) ----
   const backMat = new THREE.ShaderMaterial({
-    uniforms: { uGlow: { value: 1 }, uHeatLo: { value: PAL.heatLo }, uGraphite: { value: PAL.graphite }, uBase: { value: PAL.base } },
+    uniforms: { uGlow: { value: 1 }, uHeatLo: { value: PAL_VEC3.heatLo }, uGraphite: { value: PAL_VEC3.graphite }, uBase: { value: PAL_VEC3.base } },
     vertexShader: BACK_VERT,
     fragmentShader: BACK_FRAG,
     fog: false,
@@ -94,11 +94,11 @@ export function createKiln(scene, M) {
   scene.add(ribs);
 
   const pillarGeo = new THREE.BoxGeometry(70, 1900, 700);
-  for (const sx of [-1, 1]) {
-    const p = new THREE.Mesh(pillarGeo, M.pillars);
-    p.position.set(sx * 680, 80, -460);
-    scene.add(p);
-  }
+  const pillars = new THREE.InstancedMesh(pillarGeo, M.pillars, 2);
+  pillars.setMatrixAt(0, m4.makeTranslation(-680, 80, -460));
+  pillars.setMatrixAt(1, m4.makeTranslation(680, 80, -460));
+  pillars.instanceMatrix.needsUpdate = true;
+  scene.add(pillars);
 
   // the grate under the kiln mouth (ART 15.3 C8): cast bars along x on two bearers, no square cells.
   // C call (review 2026-10-22): the bars sit at z -60 to -300, not -180 to -780: under every fit
@@ -133,7 +133,7 @@ export function createKiln(scene, M) {
   // ---- hearth floor under the grate: tall phone views look below the kiln mouth, where the back
   // wall's fire glow read as a flat brown band. Dark refractory, warm only near the mouth.
   const floorMat = new THREE.ShaderMaterial({
-    uniforms: { uGlow: backMat.uniforms.uGlow, uHeatLo: { value: PAL.heatLo }, uGraphite: { value: PAL.graphite }, uBase: { value: PAL.base } },
+    uniforms: { uGlow: backMat.uniforms.uGlow, uHeatLo: { value: PAL_VEC3.heatLo }, uGraphite: { value: PAL_VEC3.graphite }, uBase: { value: PAL_VEC3.base } },
     vertexShader: `varying vec3 vW; void main(){ vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`,
     fragmentShader: withOutput(`precision highp float; varying vec3 vW; uniform float uGlow; uniform vec3 uHeatLo, uGraphite, uBase;
       float h(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
@@ -158,7 +158,7 @@ export function createKiln(scene, M) {
     const mat = new THREE.ShaderMaterial({
       transparent: true,
       depthWrite: false,
-      uniforms: { uTime: { value: 0 }, uSeed: { value: seed }, uAlpha: { value: a }, uWarm: { value: w }, uTint: { value: tint }, uHeatLo: { value: PAL.heatLo } },
+      uniforms: { uTime: { value: 0 }, uSeed: { value: seed }, uAlpha: { value: a }, uWarm: { value: w }, uTint: { value: tint }, uHeatLo: { value: PAL_VEC3.heatLo } },
       vertexShader: PLAIN_VERT,
       fragmentShader: HAZE_FRAG,
     });
@@ -189,7 +189,7 @@ export function createKiln(scene, M) {
   const plateMat = new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: false,
-    uniforms: { uBase: { value: PAL.base }, uTop: { value: 0.34 }, uLow: { value: 0.62 } },
+    uniforms: { uBase: { value: PAL_VEC3.base }, uTop: { value: 0.34 }, uLow: { value: 0.62 } },
     vertexShader: PLAIN_VERT,
     fragmentShader: withOutput(`precision highp float; varying vec2 vUv; uniform vec3 uBase; uniform float uTop, uLow;
       void main(){ float fy = (1.0 - vUv.y) * ${(FH + 24).toFixed(1)} - 12.0;
