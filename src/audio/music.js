@@ -1,6 +1,6 @@
 // Kiln: adaptive music (OWNER: E).
 //
-// Track map (PLAN §7 "Music"): title Machina; Ember Nightfall; Blaze Resonance; White Heat Red;
+// Track map (PLAN §7 "Music"): title Machina; Ember Nightfall; Blaze Resonance; Inferno Red;
 // bosses Ambush; Overburn Legacy; the Rusted Studio drone always underneath. For tracks with a
 // stripped mix, both mixes start together on one AudioContext clock (same `when`, loop on) and
 // crossfade by gain: full = smoothstep(0.35, 0.75, heat), smoothed over 2 s; tracks without a

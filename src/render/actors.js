@@ -179,7 +179,7 @@ export function createActors(scene, M) {
   const padTitanium = M.titanium.clone();
   padTitanium.envMapIntensity = 3.4;
   padTitanium.roughness = 0.3;
-  // A cool titanium self-light preserves the brushed surface through White Heat and flares,
+  // A cool titanium self-light preserves the brushed surface through Inferno and flares,
   // without changing any light, fire, exposure or background material.
   padTitanium.emissive = new THREE.Color(LOOK.PADDLE_SELF_LIGHT);
   padTitanium.emissiveIntensity = 1;

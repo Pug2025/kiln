@@ -37,7 +37,7 @@ const KIT_GLOW = 0.12;
 // behind the formation and the ball's path the plate steps back (ART 12a readability)
 const QUIET_BODY = 0.5;
 const QUIET_EMIT = 0.3;
-// behind D's HUD (phone band, gutters) and the plate's peak (review 2026-10-22: the White Heat slats
+// behind D's HUD (phone band, gutters) and the plate's peak (review 2026-10-22: the Inferno slats
 // measured 4x the bricks behind the phone HUD; ART 15.2: peak <= .6 linear and <= .25x the ball;
 // tests/c-look checks the cap through ACES)
 const HUD_BODY = LOOK.PLATE_HUD_BODY;

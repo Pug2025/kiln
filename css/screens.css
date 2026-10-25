@@ -296,7 +296,7 @@ kbd {
   .cell b { font-size: 18px; gap: 4px; }
   .cell.cleared b::after { width: 8px; }
 }
-/* narrow phones: White Heat may take two lines in its tab */
+/* narrow phones: keep world labels readable if a tab wraps */
 @media (max-width: 400px) {
   .tabs { gap: 3px; }
   .tab { padding: 0 2px; white-space: normal; }

@@ -431,7 +431,7 @@ export async function boot(startup = null) {
       stats,
       // desktop: the run's next step as the one primary button beside the wall (ART 15.6 D2)
       primary: { id: 'play', label: cleared ? 'Continue' : 'Play', detail: `${String(n).padStart(2, '0')}  ${levelDef(n).name}` },
-      wall: { art: `img/levels/${world}.webp`, label: world === 'whiteheat' ? 'White Heat' : world === 'blaze' ? 'Blaze' : 'Ember' },
+      wall: { art: `img/levels/${world}.webp`, label: world === 'whiteheat' ? 'Inferno' : world === 'blaze' ? 'Blaze' : 'Ember' },
       mountWall,
       muted: !!settings.muted,
       onMute: toggleMute,

@@ -1,4 +1,4 @@
-// Kiln: world 3, White Heat (levels 21-30). OWNER: B. Format: src/levels/FORMAT.md.
+// Kiln: world 3, Inferno (levels 21-30). OWNER: B. Format: src/levels/FORMAT.md.
 // Mastery: the ring field, Overloads, mazes, the scrolling Flue, portals, ghosts, the dark, and
 // The Core in 3 chained stages (bottom → left → ring).
 // Every bottom-mode formation sits low: its lowest brick row lands on grid row 17 (edge y 630)

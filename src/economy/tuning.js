@@ -97,7 +97,7 @@ export const DROP_FX = freeze({
 // The cost is only the ready line: what spaces Overloads out is the vent below.
 export const OVERLOAD_COST = freeze([0, 75, 50, 60]); // by OVERLOAD.* (none, purge, quench, fork)
 // After an Overload the kiln vents: the meter cannot fill for the vent of play (embers still pay
-// combo and points). White Heat walls refill 100 HEAT in about 4 s, so the price alone cannot
+// combo and points). Inferno walls refill 100 HEAT in about 4 s, so the price alone cannot
 // space Overloads out; the vent does, and it costs Pull for that time too. The Forge's
 // "Overload power" shortens it (FORGE_FX.VENT_MS); this is rank 0.
 export const OVERLOAD_VENT_MS = 12000;

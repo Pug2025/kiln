@@ -121,7 +121,7 @@ export function mapModel(save, getDef, names) {
   const worlds = [
     { id: 'ember', name: 'Ember', from: 1 },
     { id: 'blaze', name: 'Blaze', from: 11 },
-    { id: 'whiteheat', name: 'White Heat', from: 21 },
+    { id: 'whiteheat', name: 'Inferno', from: 21 },
   ].map((w) => {
     const levels = [];
     for (let n = w.from; n < w.from + 10; n++) {
