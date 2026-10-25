@@ -17,11 +17,13 @@ import { fileURLToPath } from 'node:url';
 
 // ARTKIT.md / ARTKIT.READY: the renderer reads them at run time to find F's finished kit files
 export const SHIP_FILES = ['index.html', 'manifest.webmanifest', 'ARTKIT.md', 'ARTKIT.READY'];
-export const SHIP_DIRS = ['css/', 'src/', 'textures/', 'glyphs/', 'models/', 'img/', 'icons/', 'audio/'];
+export const SHIP_DIRS = ['css/', 'src/', 'vendor/', 'textures/', 'glyphs/', 'models/', 'img/', 'icons/', 'audio/'];
 /** Paths D owns (FILEMAP): their entries are always checked strictly. */
-export const D_PATHS = ['index.html', 'manifest.webmanifest', 'css/', 'src/main.js', 'src/input/', 'src/ui/', 'src/app/'];
+export const D_PATHS = ['index.html', 'manifest.webmanifest', 'css/', 'vendor/', 'src/main.js', 'src/input/', 'src/ui/', 'src/app/'];
 const BEGIN = '// FILES:BEGIN';
 const END = '// FILES:END';
+const PRELOAD_BEGIN = '<!-- STARTUP:BEGIN';
+const PRELOAD_END = '<!-- STARTUP:END -->';
 
 export const repoRoot = () => join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -64,6 +66,56 @@ export function writeList(swText, files) {
   return swText.slice(0, a) + block + swText.slice(b);
 }
 
+/** Static dependencies only. Dynamic art/adapter imports keep their optional loading policy. */
+export function staticImports(source) {
+  const imports = [...source.matchAll(/^import\s+(?:(?:[^;]*?)\s+from\s+)?['"]([^'"]+)['"]\s*;/gm)].map((m) => m[1]);
+  const exports = [...source.matchAll(/^export\s+(?:\*|\{[^}]*\})\s+from\s+['"]([^'"]+)['"]\s*;/gm)].map((m) => m[1]);
+  return [...new Set([...imports, ...exports])];
+}
+
+/** The real entry's static closure, resolved through the page's import map. */
+export function startupModules(root = repoRoot(), entry = 'src/main.js') {
+  const html = readFileSync(join(root, 'index.html'), 'utf8');
+  const mapText = /<script\b[^>]*type="importmap"[^>]*>([\s\S]*?)<\/script>/.exec(html)?.[1];
+  if (!mapText) throw new Error('index.html has no import map');
+  const imports = JSON.parse(mapText).imports;
+  const prefixes = Object.keys(imports).filter((p) => p.endsWith('/')).sort((a, b) => b.length - a.length);
+  const seen = new Set();
+  function visit(path) {
+    if (seen.has(path)) return;
+    if (/^[a-z]+:/i.test(path) || path.startsWith('../')) throw new Error(`Startup dependency must be local: ${path}`);
+    seen.add(path);
+    for (const spec of staticImports(readFileSync(join(root, path), 'utf8'))) {
+      let next;
+      if (spec.startsWith('.')) next = join(dirname(path), spec);
+      else {
+        const prefix = prefixes.find((p) => spec.startsWith(p));
+        const mapped = imports[spec] ?? (prefix ? imports[prefix] + spec.slice(prefix.length) : null);
+        if (!mapped || !mapped.startsWith('./')) throw new Error(`Unresolved local startup import: ${spec} in ${path}`);
+        next = mapped.slice(2);
+      }
+      visit(next);
+    }
+  }
+  visit(entry);
+  return [...seen].sort();
+}
+
+export function readPreloads(html) {
+  const begin = html.indexOf(PRELOAD_BEGIN), end = html.indexOf(PRELOAD_END);
+  if (begin < 0 || end < begin) return [];
+  return [...html.slice(begin, end).matchAll(/href="([^"]+)"/g)].map((m) => m[1]);
+}
+
+export function writePreloads(html, modules) {
+  const block = `${PRELOAD_BEGIN} (generated: node src/app/sw-files.mjs --write) -->\n`
+    + modules.map((path) => `<link rel="modulepreload" href="${path}" data-kiln-module>`).join('\n')
+    + `\n${PRELOAD_END}`;
+  const begin = html.indexOf(PRELOAD_BEGIN), end = html.indexOf(PRELOAD_END);
+  if (begin < 0 || end < begin) return html.replace('</head>', `${block}\n</head>`);
+  return html.slice(0, begin) + block + html.slice(end + PRELOAD_END.length);
+}
+
 /**
  * Optional modules other agents add (src/app/adapters.js HOME). The page imports only those that
  * exist, from the generated src/app/present.js, so it never probes a missing file (no 404s).
@@ -89,15 +141,22 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     writeFileSync(join(root, 'src/app/present.js'), presentModule(files));
     const withPresent = files.includes('src/app/present.js') ? files : [...files, 'src/app/present.js'].sort();
     writeFileSync(swPath, writeList(readFileSync(swPath, 'utf8'), withPresent));
-    console.log(`sw.js: ${withPresent.length} files; present: ${OPTIONAL.filter((p) => files.includes(`src/${p}`)).join(' ') || 'none'}`);
+    const modules = startupModules(root);
+    const index = join(root, 'index.html');
+    writeFileSync(index, writePreloads(readFileSync(index, 'utf8'), modules));
+    console.log(`sw.js: ${withPresent.length} files; startup: ${modules.length} local modules; present: ${OPTIONAL.filter((p) => files.includes(`src/${p}`)).join(' ') || 'none'}`);
   } else if (arg === '--check') {
     const have = readList(readFileSync(swPath, 'utf8'));
     const missing = files.filter((f) => !have.includes(f));
     const stale = have.filter((f) => !files.includes(f));
-    if (missing.length || stale.length) {
+    const modules = startupModules(root);
+    const preloads = readPreloads(readFileSync(join(root, 'index.html'), 'utf8'));
+    const preloadMismatch = JSON.stringify(modules) !== JSON.stringify(preloads);
+    if (missing.length || stale.length || preloadMismatch) {
       console.log(`missing: ${missing.join(' ') || '-'}\nstale: ${stale.join(' ') || '-'}`);
+      if (preloadMismatch) console.log('startup preload manifest differs from the static entry graph');
       process.exit(1);
     }
-    console.log(`sw.js list current (${files.length} files)`);
+    console.log(`sw.js list current (${files.length} files); startup manifest current (${modules.length} modules)`);
   } else console.log(files.join('\n'));
 }

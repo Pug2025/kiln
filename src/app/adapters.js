@@ -50,7 +50,7 @@ const asList = (x) => (Array.isArray(x) ? x : x && typeof x === 'object' ? Objec
  * Resolve every optional export once at boot.
  * @returns {Promise<object>} the normalised adapter API (see the bottom of this file)
  */
-export async function loadAdapters() {
+export async function loadAdapters({ importModule = (path) => import(path), timeoutMs = 2500, diagnostic = () => {} } = {}) {
   const found = {};
   const entry = [economy, saveMod, levels, audioMod, renderMod];
   for (const name of Object.keys(HOME)) {
@@ -59,10 +59,16 @@ export async function loadAdapters() {
   const missing = [...new Set(Object.keys(HOME).filter((n) => found[n] === undefined).map((n) => HOME[n]))]
     .filter((path) => PRESENT.includes(path.slice(3))); // never ask for a file that is not there
   await Promise.all(missing.map(async (path) => {
+    let timer;
     try {
-      const mod = await import(path);
+      const mod = await Promise.race([
+        Promise.resolve().then(() => importModule(path)),
+        new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Optional module timed out')), timeoutMs); }),
+      ]);
       for (const [name, home] of Object.entries(HOME)) if (home === path && found[name] === undefined && mod[name] !== undefined) found[name] = mod[name];
-    } catch { /* not built yet: the fallback stays */ }
+    } catch (error) {
+      diagnostic({ stage: 'adapters', kind: 'optional-module', url: new URL(path, import.meta.url).href, message: error?.message || String(error) });
+    } finally { clearTimeout(timer); }
   }));
   return makeApi(found);
 }

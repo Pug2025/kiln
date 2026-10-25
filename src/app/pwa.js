@@ -73,8 +73,11 @@ export function initPwa(opts) {
     });
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((reg) => {
       document.addEventListener('visibilitychange', () => { if (!document.hidden) reg.update().catch(() => {}); });
-    }).catch((e) => console.warn('[kiln] service worker', e));
-    window.addEventListener('load', () => {
+    }).catch((e) => {
+      opts.diagnostic?.({ stage: 'service-worker-register', kind: 'service-worker', url: new URL('sw.js', location.href).href, message: e?.message || String(e) });
+      console.warn('[kiln] service worker', e);
+    });
+    const warmAfterLoad = () => {
       setTimeout(() => {
         navigator.serviceWorker.ready.then((reg) => {
           if (!reg.active) return;
@@ -86,7 +89,9 @@ export function initPwa(opts) {
           if (good) reg.active.postMessage({ type: 'warm' });
         }).catch(() => {});
       }, 4000);
-    });
+    };
+    if (document.readyState === 'complete') warmAfterLoad();
+    else window.addEventListener('load', warmAfterLoad, { once: true });
     setInterval(() => { if (!maybeReload()) maybeToast(); }, 1500);
   }
 

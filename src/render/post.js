@@ -9,6 +9,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { LOOK } from './look.js';
+import { BALL_BLOOM, writeBallBloom } from './ball-bloom.js';
 
 const MSAA_PARAM = (() => {
   const v = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('msaa') : null;
@@ -36,8 +37,9 @@ export function createPost(gl, scene, camera) {
   output.material.fragmentShader = output.material.fragmentShader
     .replace('void main() {', 'uniform float uSat;\nvoid main() {')
     .replace('// color space', 'gl_FragColor.rgb = mix(vec3(dot(gl_FragColor.rgb, vec3(0.2126, 0.7152, 0.0722))), gl_FragColor.rgb, uSat);\n\t// color space');
-  // ART 12b: the fire's bloom never spreads over the paddle. The bloom composite is masked inside a
-  // capsule around the paddle (screen pixels, set per frame); 15% is kept so the cut never shows.
+  // ART 12b: protect the paddle from fire bloom and each visible gameplay ball from the
+  // surrounding bloom. Soft circles use the same 15% floor as the paddle capsule, and max
+  // protection keeps overlapping regions from multiplying into a dark cut.
   const cm = bloom.compositeMaterial;
   Object.assign(cm.uniforms, {
     uMaskA: { value: new THREE.Vector2(-1e4, -1e4) },
@@ -45,16 +47,30 @@ export function createPost(gl, scene, camera) {
     uMaskR: { value: 1 },
     uMaskF: { value: 1 },
     uRes: { value: new THREE.Vector2(1, 1) },
+    uBallMasks: { value: new Float32Array(BALL_BLOOM.MAX * 4) },
+    uBallMaskCount: { value: 0 },
   });
   const fs = cm.fragmentShader;
   const end = fs.lastIndexOf('}');
   cm.fragmentShader = fs.slice(0, end).replace('void main() {', `uniform vec2 uMaskA, uMaskB, uRes; uniform float uMaskR, uMaskF;
+    uniform vec4 uBallMasks[${BALL_BLOOM.MAX}]; uniform int uBallMaskCount;
     float paddleBand(){
       vec2 p = vUv * uRes, pa = p - uMaskA, ba = uMaskB - uMaskA;
       float k = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-4), 0.0, 1.0);
       return 1.0 - smoothstep(uMaskR, uMaskR + uMaskF, length(pa - ba * k));
     }
-    void main() {`) + '\n  gl_FragColor *= 1.0 - 0.85 * paddleBand();\n}';
+    float ballBand(){
+      if (uBallMaskCount == 0) return 0.0;
+      vec2 p = vUv * uRes;
+      float band = 0.0;
+      for (int i = 0; i < ${BALL_BLOOM.MAX}; i++) {
+        if (i >= uBallMaskCount) break;
+        vec4 mask = uBallMasks[i];
+        band = max(band, 1.0 - smoothstep(mask.z, mask.z + mask.w, length(p - mask.xy)));
+      }
+      return band;
+    }
+    void main() {`) + '\n  gl_FragColor *= 1.0 - 0.85 * max(paddleBand(), ballBand());\n}';
   cm.needsUpdate = true;
 
   composer.addPass(renderPass);
@@ -99,6 +115,7 @@ export function createPost(gl, scene, camera) {
     setBloom(on) {
       useBloom = on;
       bloom.enabled = on;
+      if (!on) this.clearBallMasks();
     },
 
     /** The quality ladder: composer MSAA off (applies at the next setSize). */
@@ -116,6 +133,17 @@ export function createPost(gl, scene, camera) {
       cm.uniforms.uMaskB.value.set(bx, by);
       cm.uniforms.uMaskR.value = r;
       cm.uniforms.uMaskF.value = f;
+    },
+
+    /** Gameplay circles, after the actual camera moved; the paddle mask stays in place. */
+    setBallMasks(world, alpha, clip, width, height, gameplay) {
+      cm.uniforms.uBallMaskCount.value = writeBallBloom(cm.uniforms.uBallMasks.value,
+        world, alpha, clip, width, height, useBloom && gameplay);
+    },
+
+    clearBallMasks() {
+      cm.uniforms.uBallMaskCount.value = 0;
+      cm.uniforms.uBallMasks.value.fill(0);
     },
 
     setSaturation(s) {

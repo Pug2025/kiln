@@ -8,7 +8,7 @@ import { SFX_FILES } from './sfx.js';
 const SB = (title) => `'${title}' by Scott Buckley - released under CC-BY 4.0. www.scottbuckley.com.au`;
 
 /**
- * kind: 'music' | 'drone' | 'sounds' | 'licence'. `files` are the shipped file names the line
+ * kind: 'music' | 'drone' | 'sounds' | 'licence' | 'software'. `files` are the shipped file names the line
  * covers (MUSIC_FILES / SFX_FILES keys); `url` is the work's page.
  */
 export const CREDITS = Object.freeze([
@@ -33,6 +33,7 @@ export const CREDITS = Object.freeze([
     files: ['hover', 'victory', 'transmission'],
   },
   { kind: 'licence', title: 'CC BY 4.0', line: 'Licence text: https://creativecommons.org/licenses/by/4.0/', url: 'https://creativecommons.org/licenses/by/4.0/', files: [] },
+  { kind: 'software', title: 'Three.js', line: 'Three.js 0.160.0 by the three.js authors, MIT License, https://threejs.org/', url: 'https://threejs.org/', files: [] },
 ].map((c) => Object.freeze({ ...c, files: Object.freeze(c.files) })));
 
 /** Every line, in order (PLAN §7). */

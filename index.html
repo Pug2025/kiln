@@ -12,29 +12,335 @@
 <meta name="format-detection" content="telephone=no">
 <meta name="description" content="Kiln is a brick breaker with 30 levels, three bosses, power drops and permanent upgrades. Clear the campaign to unlock endless Overburn.">
 <title>Kiln</title>
+<script id="kiln-startup">
+// Independent of external scripts, styles, fonts and the service worker.
+function kilnStartupGuard(win, doc, loadMain) {
+  const LOG = 'kiln.startup.log', RETRY = 'kiln.startup.retry', EPISODE = 'kiln.startup.episode';
+  const entryUrl = new URL('./src/main.js', doc.baseURI).href;
+  let records = [], episode = null, current = 'modules', ready = false, failed = false, started = false;
+  let reloadTimer = null, build = null, fontSettled = false;
+  const settled = new Set(), active = new Set(), failures = new WeakMap(), styleWaiters = new Map();
+  try { records = JSON.parse(win.sessionStorage.getItem(LOG) || '[]').filter((r) => r && typeof r === 'object').slice(-16); } catch { /* storage is optional */ }
+  try {
+    const saved = JSON.parse(win.sessionStorage.getItem(EPISODE) || 'null');
+    if (saved?.failure) episode = { failure: saved.failure, lastFailure: saved.lastFailure || null, retries: (saved.retries || []).slice(-2), recovery: saved.recovery || null };
+  } catch { /* storage is optional */ }
+  function saveEpisode() {
+    try { win.sessionStorage.setItem(EPISODE, JSON.stringify(episode)); } catch { /* keep the in-memory episode */ }
+  }
+  function retryNote(kind) {
+    const record = note({ kind, attempt: 1 });
+    if (episode) { episode.retries = [...episode.retries, record].slice(-2); saveEpisode(); }
+  }
+  let fontDone;
+  const fontStyleReady = new Promise((resolve) => { fontDone = resolve; });
+  const clip = (v, max = 1500) => v == null ? null : String(v).slice(0, max);
+  function note(info) {
+    const record = {
+      time: Date.now(), stage: clip(info.stage || current, 80), kind: clip(info.kind || 'stage', 80),
+      url: clip(info.url), entryUrl, message: clip(info.message || info.error),
+      status: Number.isFinite(info.status) ? info.status : null,
+      attempt: Number(info.attempt) || 0, online: win.navigator.onLine !== false,
+      build: clip(info.build || build, 120), controller: clip(win.navigator.serviceWorker?.controller?.scriptURL),
+    };
+    if (info.pendingUrls) record.pendingUrls = info.pendingUrls.slice(0, 200);
+    records.push(record);
+    records = records.slice(-16);
+    try { win.sessionStorage.setItem(LOG, JSON.stringify(records)); } catch { /* keep the in-memory journal */ }
+    return record;
+  }
+  function pendingUrls() {
+    return Array.from(doc.querySelectorAll('link[data-kiln-module],link[data-kiln-required]'))
+      .map((link) => link.href).filter((url) => !settled.has(url));
+  }
+  function showFailure() {
+    if (!doc.body || doc.getElementById('startup-recovery')) return;
+    const box = doc.createElement('div'), text = doc.createElement('p'), button = doc.createElement('button');
+    // An unfinished application stylesheet must not keep the independent fallback from painting.
+    for (const link of doc.querySelectorAll('link[data-kiln-required]')) if (!settled.has(link.href)) link.media = 'not all';
+    box.id = 'startup-recovery';
+    box.setAttribute('role', 'alert');
+    box.style.cssText = 'position:fixed;inset:0;z-index:10000;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;padding:24px;background:#121417;color:#f2f4f7;text-align:center;font:400 16px/1.4 system-ui,sans-serif;';
+    text.textContent = win.navigator.onLine === false ? 'Kiln could not load. You are offline.' : 'Kiln could not load.';
+    button.type = 'button';
+    button.textContent = 'Tap to retry';
+    button.style.cssText = 'min-width:160px;min-height:44px;padding:12px 20px;border:1px solid #6b6d70;border-radius:4px;background:#303236;color:#f2f4f7;font:500 16px/1.25 system-ui,sans-serif;cursor:pointer;';
+    button.addEventListener('click', () => {
+      if (button.disabled) return;
+      button.disabled = true;
+      win.clearTimeout(reloadTimer);
+      try { win.sessionStorage.setItem(RETRY, '1'); } catch { /* explicit navigation is always allowed */ }
+      retryNote('manual-retry');
+      win.location.reload();
+    });
+    box.append(text, button);
+    doc.body.append(box);
+    button.focus();
+  }
+  function fail(error, info = {}) {
+    if (ready) return;
+    current = info.stage || failures.get(error) || current;
+    const record = note({ ...info, message: error?.message || error || info.message, stage: current });
+    if (failed) return;
+    failed = true;
+    if (episode && !episode.recovery) episode.lastFailure = record;
+    else episode = { failure: record, lastFailure: null, retries: [], recovery: null };
+    saveEpisode();
+    win.clearTimeout(watchdog);
+    showFailure();
+    if (!info.retry || win.navigator.onLine === false) return;
+    // A denied storage write must not create a reload loop.
+    try {
+      if (win.sessionStorage.getItem(RETRY) === '1') return;
+      win.sessionStorage.setItem(RETRY, '1');
+      if (win.sessionStorage.getItem(RETRY) !== '1') return;
+    } catch { return; }
+    retryNote('automatic-retry');
+    reloadTimer = win.setTimeout(() => win.location.reload(), 200);
+  }
+  function resourceError(event) {
+    const target = event.target;
+    if (!target?.hasAttribute) return;
+    const url = target.href || target.src || null;
+    if (target.hasAttribute('data-kiln-fonts')) {
+      fontSettled = true;
+      fontDone();
+      note({ kind: 'optional-resource', stage: 'fonts', url, message: 'Font stylesheet unavailable' });
+    } else if (target.hasAttribute('data-kiln-module') || target.hasAttribute('data-kiln-required')) {
+      settle(url);
+      fail('Required resource unavailable', { kind: 'resource', stage: target.hasAttribute('data-kiln-module') ? 'modules' : 'styles', url, retry: true });
+    }
+  }
+  function settle(url) {
+    settled.add(url);
+    styleWaiters.get(url)?.();
+    styleWaiters.delete(url);
+  }
+  function resourceLoaded(event) {
+    const target = event.target;
+    if (!target?.hasAttribute) return;
+    if (target.hasAttribute('data-kiln-fonts')) {
+      fontSettled = true;
+      target.media = 'all';
+      fontDone();
+    }
+    if (target.hasAttribute('data-kiln-module') || target.hasAttribute('data-kiln-required')) settle(target.href);
+  }
+  function exception(event) {
+    if (event.target && event.target !== win) return;
+    fail(event.error || event.message || 'Startup exception', { kind: 'exception', url: event.filename || null });
+  }
+  function rejection(event) {
+    fail(event.reason || 'Startup promise rejected', { kind: 'rejection' });
+  }
+  function workerMessage(event) {
+    if (event.data?.type !== 'kiln-startup-diagnostic') return;
+    build = event.data.build || build;
+    note({ ...event.data, kind: 'service-worker' });
+  }
+  const watchdog = win.setTimeout(() => fail('Startup timed out', {
+    kind: 'timeout', pendingUrls: pendingUrls(), retry: true,
+  }), 20000);
+  const api = {
+    fontStyleReady,
+    note,
+    stage(name) { if (!ready && !failed) { current = name; note({ stage: name }); } },
+    task(name, operation) {
+      active.add(name);
+      note({ stage: name });
+      return Promise.resolve().then(operation).catch((error) => {
+        const err = error && typeof error === 'object' ? error : new Error(String(error));
+        failures.set(err, name);
+        throw err;
+      }).finally(() => active.delete(name));
+    },
+    ready() {
+      if (ready || failed) return;
+      ready = true;
+      current = 'ready';
+      const record = note({ stage: current });
+      if (episode && !episode.recovery) { episode.recovery = record; saveEpisode(); }
+      win.clearTimeout(watchdog);
+      win.clearTimeout(reloadTimer);
+      try { win.sessionStorage.removeItem(RETRY); } catch { /* storage is optional */ }
+      doc.removeEventListener('error', resourceError, true);
+      doc.removeEventListener('load', resourceLoaded, true);
+      // Font CSS may arrive after the atlas deadline and first frame. It still styles DOM text.
+      if (!fontSettled) for (const link of doc.querySelectorAll('link[data-kiln-fonts]')) {
+        link.addEventListener('load', () => { link.media = 'all'; fontDone(); }, { once: true });
+        link.addEventListener('error', () => fontDone(), { once: true });
+      }
+      win.removeEventListener('error', exception);
+      win.removeEventListener('unhandledrejection', rejection);
+      // Keep nonfatal install/cache diagnostics after ready; a background install can finish later.
+    },
+    snapshot() {
+      return { stage: current, ready, failed, entryUrl, active: [...active], pendingUrls: ready ? [] : pendingUrls(), records: JSON.parse(JSON.stringify(records)), episode: JSON.parse(JSON.stringify(episode)) };
+    },
+    async start() {
+      if (started || failed) return;
+      started = true;
+      api.stage('modules');
+      try {
+        const styles = Array.from(doc.querySelectorAll('link[data-kiln-required]')).filter((link) => !settled.has(link.href))
+          .map((link) => new Promise((resolve) => styleWaiters.set(link.href, resolve)));
+        const [main] = await Promise.all([loadMain(), Promise.all(styles)]);
+        if (!failed) await main.boot(api);
+      } catch (error) {
+        const network = /fetch dynamically imported|importing a module script|loading dynamically imported|networkerror|load failed/i.test(error?.message || '');
+        fail(error, { kind: 'entry', retry: network && !(error instanceof SyntaxError) });
+      }
+    },
+  };
+  doc.addEventListener('error', resourceError, true);
+  doc.addEventListener('load', resourceLoaded, true);
+  win.addEventListener('error', exception);
+  win.addEventListener('unhandledrejection', rejection);
+  win.navigator.serviceWorker?.addEventListener('message', workerMessage);
+  function parsed() { if (failed) showFailure(); else api.start(); }
+  if (doc.readyState === 'loading') doc.addEventListener('DOMContentLoaded', parsed, { once: true });
+  else parsed();
+  return api;
+}
+if (typeof window !== 'undefined') window.__kilnStartup = kilnStartupGuard(window, document, () => import('./src/main.js'));
+</script>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" href="icons/favicon.png">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&family=Inter+Tight:wght@600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/tokens.css">
-<link rel="stylesheet" href="css/app.css">
-<link rel="stylesheet" href="css/hud.css">
-<link rel="stylesheet" href="css/screens.css">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&family=Inter+Tight:wght@600;700&display=swap" rel="stylesheet" media="print" data-kiln-fonts>
+<link rel="stylesheet" href="css/tokens.css" data-kiln-required>
+<link rel="stylesheet" href="css/app.css" data-kiln-required>
+<link rel="stylesheet" href="css/hud.css" data-kiln-required>
+<link rel="stylesheet" href="css/screens.css" data-kiln-required>
 <script type="importmap">
 { "imports": {
-  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  "three": "./vendor/three/0.160.0/build/three.module.js",
+  "three/addons/": "./vendor/three/0.160.0/examples/jsm/"
 } }
 </script>
+<!-- STARTUP:BEGIN (generated: node src/app/sw-files.mjs --write) -->
+<link rel="modulepreload" href="src/app/adapters.js" data-kiln-module>
+<link rel="modulepreload" href="src/app/fallbacks.js" data-kiln-module>
+<link rel="modulepreload" href="src/app/flow.js" data-kiln-module>
+<link rel="modulepreload" href="src/app/fonts.js" data-kiln-module>
+<link rel="modulepreload" href="src/app/present.js" data-kiln-module>
+<link rel="modulepreload" href="src/app/pwa.js" data-kiln-module>
+<link rel="modulepreload" href="src/app/safe-area.js" data-kiln-module>
+<link rel="modulepreload" href="src/audio/audio.js" data-kiln-module>
+<link rel="modulepreload" href="src/audio/music.js" data-kiln-module>
+<link rel="modulepreload" href="src/audio/sfx.js" data-kiln-module>
+<link rel="modulepreload" href="src/content/bosses.js" data-kiln-module>
+<link rel="modulepreload" href="src/content/bosses/common.js" data-kiln-module>
+<link rel="modulepreload" href="src/content/bosses/orbit.js" data-kiln-module>
+<link rel="modulepreload" href="src/content/bosses/stoker.js" data-kiln-module>
+<link rel="modulepreload" href="src/content/bricks.js" data-kiln-module>
+<link rel="modulepreload" href="src/content/content.js" data-kiln-module>
+<link rel="modulepreload" href="src/content/gates.js" data-kiln-module>
+<link rel="modulepreload" href="src/content/sentries.js" data-kiln-module>
+<link rel="modulepreload" href="src/core/bus.js" data-kiln-module>
+<link rel="modulepreload" href="src/core/constants.js" data-kiln-module>
+<link rel="modulepreload" href="src/core/events.js" data-kiln-module>
+<link rel="modulepreload" href="src/core/input-frame.js" data-kiln-module>
+<link rel="modulepreload" href="src/core/readability.js" data-kiln-module>
+<link rel="modulepreload" href="src/core/rng.js" data-kiln-module>
+<link rel="modulepreload" href="src/core/world.js" data-kiln-module>
+<link rel="modulepreload" href="src/economy/drops.js" data-kiln-module>
+<link rel="modulepreload" href="src/economy/economy.js" data-kiln-module>
+<link rel="modulepreload" href="src/economy/forge.js" data-kiln-module>
+<link rel="modulepreload" href="src/economy/mods.js" data-kiln-module>
+<link rel="modulepreload" href="src/economy/overloads.js" data-kiln-module>
+<link rel="modulepreload" href="src/economy/save.js" data-kiln-module>
+<link rel="modulepreload" href="src/economy/score.js" data-kiln-module>
+<link rel="modulepreload" href="src/economy/tuning.js" data-kiln-module>
+<link rel="modulepreload" href="src/input/gestures.js" data-kiln-module>
+<link rel="modulepreload" href="src/input/input.js" data-kiln-module>
+<link rel="modulepreload" href="src/levels/data/blaze.js" data-kiln-module>
+<link rel="modulepreload" href="src/levels/data/ember.js" data-kiln-module>
+<link rel="modulepreload" href="src/levels/data/whiteheat.js" data-kiln-module>
+<link rel="modulepreload" href="src/levels/index.js" data-kiln-module>
+<link rel="modulepreload" href="src/levels/legend.js" data-kiln-module>
+<link rel="modulepreload" href="src/levels/overburn.js" data-kiln-module>
+<link rel="modulepreload" href="src/levels/parser.js" data-kiln-module>
+<link rel="modulepreload" href="src/main.js" data-kiln-module>
+<link rel="modulepreload" href="src/render/actors.js" data-kiln-module>
+<link rel="modulepreload" href="src/render/ball-bloom.js" data-kiln-module>
+<link rel="modulepreload" href="src/render/boss-feedback.js" data-kiln-module>
+<link rel="modulepreload" href="src/render/boss.js" data-kiln-module>
+<link rel="modulepreload" href="src/render/bricks.js" data-kiln-module>
+<link rel="modulepreload" href="src/render/ceiling.js" data-kiln-module>
+<link rel="modulepreload" href="src/render/fire.js" data-kiln-module>
+<link rel="modulepreload" href="src/render/fit.js" data-kiln-module>
+<link rel="modulepreload" href="src/render/fx.js" data-kiln-module>
+<link rel="modulepreload" href="src/render/glcontext.js" data-kiln-module>
+<link rel="modulepreload" href="src/render/gputimer.js" data-kiln-module>
+<link rel="modulepreload" href="src/render/headroom.js" data-kiln-module>
+<link rel="modulepreload" href="src/render/kiln.js" data-kiln-module>
+<link rel="modulepreload" href="src/render/kit.js" data-kiln-module>
+<link rel="modulepreload" href="src/render/laser-mounts.js" data-kiln-module>
+<link rel="modulepreload" href="src/render/look.js" data-kiln-module>
+<link rel="modulepreload" href="src/render/marks.js" data-kiln-module>
+<link rel="modulepreload" href="src/render/materials.js" data-kiln-module>
+<link rel="modulepreload" href="src/render/overlays.js" data-kiln-module>
+<link rel="modulepreload" href="src/render/pace.js" data-kiln-module>
+<link rel="modulepreload" href="src/render/palette-uniforms.js" data-kiln-module>
+<link rel="modulepreload" href="src/render/phone-marks.js" data-kiln-module>
+<link rel="modulepreload" href="src/render/pieces.js" data-kiln-module>
+<link rel="modulepreload" href="src/render/post.js" data-kiln-module>
+<link rel="modulepreload" href="src/render/renderer.js" data-kiln-module>
+<link rel="modulepreload" href="src/render/rig.js" data-kiln-module>
+<link rel="modulepreload" href="src/render/shaders.js" data-kiln-module>
+<link rel="modulepreload" href="src/render/trail.js" data-kiln-module>
+<link rel="modulepreload" href="src/sim/aim.js" data-kiln-module>
+<link rel="modulepreload" href="src/sim/ball.js" data-kiln-module>
+<link rel="modulepreload" href="src/sim/bodies.js" data-kiln-module>
+<link rel="modulepreload" href="src/sim/ceiling.js" data-kiln-module>
+<link rel="modulepreload" href="src/sim/collide.js" data-kiln-module>
+<link rel="modulepreload" href="src/sim/feel.js" data-kiln-module>
+<link rel="modulepreload" href="src/sim/field.js" data-kiln-module>
+<link rel="modulepreload" href="src/sim/paddle.js" data-kiln-module>
+<link rel="modulepreload" href="src/sim/physics.js" data-kiln-module>
+<link rel="modulepreload" href="src/sim/robot.js" data-kiln-module>
+<link rel="modulepreload" href="src/systems.js" data-kiln-module>
+<link rel="modulepreload" href="src/ui/dom.js" data-kiln-module>
+<link rel="modulepreload" href="src/ui/hud.js" data-kiln-module>
+<link rel="modulepreload" href="src/ui/icons.js" data-kiln-module>
+<link rel="modulepreload" href="src/ui/layout.js" data-kiln-module>
+<link rel="modulepreload" href="src/ui/nav.js" data-kiln-module>
+<link rel="modulepreload" href="src/ui/play-help.js" data-kiln-module>
+<link rel="modulepreload" href="src/ui/resources.js" data-kiln-module>
+<link rel="modulepreload" href="src/ui/screens/card.js" data-kiln-module>
+<link rel="modulepreload" href="src/ui/screens/credits.js" data-kiln-module>
+<link rel="modulepreload" href="src/ui/screens/forge.js" data-kiln-module>
+<link rel="modulepreload" href="src/ui/screens/guide.js" data-kiln-module>
+<link rel="modulepreload" href="src/ui/screens/index.js" data-kiln-module>
+<link rel="modulepreload" href="src/ui/screens/map.js" data-kiln-module>
+<link rel="modulepreload" href="src/ui/screens/parts.js" data-kiln-module>
+<link rel="modulepreload" href="src/ui/screens/pause.js" data-kiln-module>
+<link rel="modulepreload" href="src/ui/screens/pick.js" data-kiln-module>
+<link rel="modulepreload" href="src/ui/screens/results.js" data-kiln-module>
+<link rel="modulepreload" href="src/ui/screens/settings.js" data-kiln-module>
+<link rel="modulepreload" href="src/ui/screens/title.js" data-kiln-module>
+<link rel="modulepreload" href="src/ui/ui.js" data-kiln-module>
+<link rel="modulepreload" href="vendor/three/0.160.0/build/three.module.js" data-kiln-module>
+<link rel="modulepreload" href="vendor/three/0.160.0/examples/jsm/geometries/RoundedBoxGeometry.js" data-kiln-module>
+<link rel="modulepreload" href="vendor/three/0.160.0/examples/jsm/postprocessing/EffectComposer.js" data-kiln-module>
+<link rel="modulepreload" href="vendor/three/0.160.0/examples/jsm/postprocessing/MaskPass.js" data-kiln-module>
+<link rel="modulepreload" href="vendor/three/0.160.0/examples/jsm/postprocessing/OutputPass.js" data-kiln-module>
+<link rel="modulepreload" href="vendor/three/0.160.0/examples/jsm/postprocessing/Pass.js" data-kiln-module>
+<link rel="modulepreload" href="vendor/three/0.160.0/examples/jsm/postprocessing/RenderPass.js" data-kiln-module>
+<link rel="modulepreload" href="vendor/three/0.160.0/examples/jsm/postprocessing/ShaderPass.js" data-kiln-module>
+<link rel="modulepreload" href="vendor/three/0.160.0/examples/jsm/postprocessing/UnrealBloomPass.js" data-kiln-module>
+<link rel="modulepreload" href="vendor/three/0.160.0/examples/jsm/shaders/CopyShader.js" data-kiln-module>
+<link rel="modulepreload" href="vendor/three/0.160.0/examples/jsm/shaders/LuminosityHighPassShader.js" data-kiln-module>
+<link rel="modulepreload" href="vendor/three/0.160.0/examples/jsm/shaders/OutputShader.js" data-kiln-module>
+<!-- STARTUP:END -->
 </head>
 <body>
 <div id="stage" aria-label="Kiln play field"><div id="view"></div></div>
 <div class="boot-plate" aria-hidden="true"></div>
 <div id="ui"></div>
 <noscript><div class="boot">Kiln needs JavaScript.</div></noscript>
-<script type="module" src="src/main.js"></script>
 </body>
 </html>

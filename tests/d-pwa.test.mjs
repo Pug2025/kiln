@@ -3,37 +3,45 @@ import { test, assert } from './lib.mjs';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 
-function page({ controlled = false, safe = false, updated = false } = {}) {
+function page({ controlled = false, safe = false, updated = false, registrationError = null, complete = false } = {}) {
   let toastSafe = safe;
   const sw = new EventTarget();
   sw.controller = controlled ? {} : null;
-  sw.register = () => Promise.resolve({});
+  sw.register = () => registrationError ? Promise.reject(registrationError) : Promise.resolve({});
   let reloads = 0;
   const stored = new Map();
   if (updated) stored.set('kiln.updated', '1');
   const timers = [];
   const polls = [];
   const toasts = [];
+  const diagnostics = [];
+  const messages = [];
+  sw.ready = Promise.resolve({ active: { postMessage: (message) => messages.push(message) } });
   const sandbox = {
     URLSearchParams,
-    location: { search: '?sw=1', hostname: 'localhost', reload() { reloads++; } },
+    URL,
+    location: { href: 'https://kiln.test/game/?sw=1', search: '?sw=1', hostname: 'localhost', reload() { reloads++; } },
     navigator: { serviceWorker: sw, userAgent: 'test', platform: 'test' },
     window: new EventTarget(), document: new EventTarget(),
     sessionStorage: { getItem: (k) => stored.get(k), setItem: (k, v) => stored.set(k, v), removeItem: (k) => stored.delete(k) },
-    setInterval(f) { polls.push(f); }, setTimeout(f) { timers.push(f); }, console,
+    performance: { getEntriesByType: () => [{ name: 'https://fonts.googleapis.com/css?family=Inter' }, { name: 'https://kiln.test/game/vendor/three/0.160.0/build/three.module.js' }] },
+    setInterval(f) { polls.push(f); }, setTimeout(f, ms) { timers.push({ f, ms }); }, console: { ...console, warn() {} },
   };
+  sandbox.document.readyState = complete ? 'complete' : 'loading';
   const source = readFileSync(new URL('../src/app/pwa.js', import.meta.url), 'utf8')
     .replace('export function initPwa', 'function initPwa');
   runInNewContext(`${source}\nglobalThis.initPwa = initPwa;`, sandbox);
-  const pwa = sandbox.initPwa({ canReload: () => safe, canToast: () => toastSafe, toast(t) { toasts.push(t); } });
+  const pwa = sandbox.initPwa({ canReload: () => safe, canToast: () => toastSafe, toast(t) { toasts.push(t); }, diagnostic: (record) => diagnostics.push(record) });
   return {
     claim() { sw.controller = {}; sw.dispatchEvent(new Event('controllerchange')); },
     play() { safe = false; toastSafe = false; },
     pause() { toastSafe = true; for (const f of polls) f(); },
     safePoint() { safe = true; toastSafe = true; pwa.safePoint(); },
-    timers() { for (const f of timers.splice(0)) f(); },
+    timers() { for (const { f } of timers.splice(0)) f(); },
+    load() { sandbox.window.dispatchEvent(new Event('load')); },
+    get warmTimers() { return timers.filter((timer) => timer.ms === 4000).length; },
     get reloads() { return reloads; }, stored,
-    toasts,
+    toasts, diagnostics, messages,
   };
 }
 
@@ -50,6 +58,31 @@ test('first install stays in play, then a real upgrade waits for a safe point', 
   p.safePoint();
   assert.equal(p.reloads, 1, 'upgrade is recognized on the first-visit page');
   assert.equal(p.stored.get('kiln.updated'), '1', 'upgrade carries the once-only toast over reload');
+});
+
+test('a failed worker registration records its exact URL and leaves network startup usable', async () => {
+  const p = page({ registrationError: new Error('Registration blocked') });
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal(p.reloads, 0);
+  assert.equal(p.diagnostics.length, 1);
+  assert.equal(p.diagnostics[0].stage, 'service-worker-register');
+  assert.equal(p.diagnostics[0].url, 'https://kiln.test/game/sw.js');
+  assert.equal(p.diagnostics[0].message, 'Registration blocked');
+});
+
+test('offline font and music warm-up schedules once when startup misses the window load event', async () => {
+  for (const complete of [false, true]) {
+    const p = page({ complete });
+    assert.equal(p.warmTimers, complete ? 1 : 0);
+    p.load(); p.load();
+    assert.equal(p.warmTimers, 1);
+    p.timers();
+    await Promise.resolve(); await Promise.resolve();
+    assert.equal(p.messages.length, 2);
+    assert.equal(p.messages[0].type, 'cache-urls');
+    assert.deepEqual([...p.messages[0].urls], ['https://fonts.googleapis.com/css?family=Inter']);
+    assert.equal(p.messages[1].type, 'warm');
+  }
 });
 
 test('a controlled page does not reload during play and reloads once at the map', () => {

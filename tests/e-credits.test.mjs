@@ -21,6 +21,7 @@ const PLAN_LINES = [
   'Drone: "Free Music ATMOS – Linear Atmospheres", FabienC@RustedMusicStudio, CC BY 4.0, https://rustedstudio.itch.io/free-music-atmos-linear-atmospheres',
   'Sounds: "Dark Sci-Fi Audio Pack" by SRG774, CC0, https://opengameart.org/content/dark-sci-fi-audio-pack',
   'Licence text: https://creativecommons.org/licenses/by/4.0/',
+  'Three.js 0.160.0 by the three.js authors, MIT License, https://threejs.org/',
 ];
 
 test('credit lines match the exact format', () => {

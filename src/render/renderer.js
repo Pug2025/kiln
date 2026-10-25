@@ -43,6 +43,7 @@ import { createPost } from './post.js';
 import { loadKit } from './kit.js';
 import { screenToFieldPose, restPose, createPose } from './fit.js';
 import { watchContext } from './glcontext.js';
+import { waitForFonts } from '../app/fonts.js';
 import {
   PACE, STEP_NAMES, createPace, pacePush, pacePushGpu, paceReset, paceMedianIv, paceMedianWork, paceMedianGpu, histQuantile,
   createLadder, ladderDecide, ladderReset,
@@ -52,11 +53,6 @@ import { createGpuTimer } from './gputimer.js';
 const HW = FIELD.W / 2;
 const HH = FIELD.H / 2;
 const HIST_N = 100;
-
-/** Resolve after a promise or a timeout, whichever comes first (fonts must never block boot). */
-function within(p, ms) {
-  return Promise.race([p.catch(() => null), new Promise((r) => setTimeout(r, ms))]);
-}
 
 /**
  * @param {HTMLElement} host
@@ -108,13 +104,8 @@ export async function createRenderer(host, opts = {}) {
   scene.fog = new THREE.Fog(PAL.base, LOOK.FOG_NEAR, LOOK.FOG_FAR);
   const camera = new THREE.PerspectiveCamera(35, 1, 10, 8000);
 
-  // fonts first: the digit atlas needs Inter Tight (never wait more than 2.5 s)
-  if (document.fonts && document.fonts.load) {
-    await within(Promise.all([
-      document.fonts.load('600 100px "Inter Tight"'),
-      document.fonts.load('700 100px "Inter Tight"'),
-    ]), 2500);
-  }
+  // The optional stylesheet and font files share one 2.5 s bound; neither can block boot.
+  await waitForFonts(document.fonts, opts.fontStyleReady);
 
   const M = createMaterials(gl);
   scene.environment = makeEnvironment(gl);
@@ -175,6 +166,7 @@ export async function createRenderer(host, opts = {}) {
   const restCam = createPose();
   const padA = new THREE.Vector3(), padB = new THREE.Vector3();
   const projA = new THREE.Vector3(), projB = new THREE.Vector3();
+  const bloomProjection = new THREE.Matrix4();
   const lastLifeColor = new THREE.Color(LOOK.HEAT_LO_LAST);
 
   const stats = {
@@ -423,8 +415,8 @@ export async function createRenderer(host, opts = {}) {
     padB.set(bx, by, 0);
   }
 
-  /** ART 12b: keep the bloom off the paddle (after the camera moved this frame). */
-  function bloomMask(w) {
+  /** ART 12b: protect the paddle and gameplay balls after the camera moved this frame. */
+  function bloomMask(w, alpha) {
     if (!post.bloomOn) return;
     const bw = width * pr, bh = height * pr;
     projA.copy(padA).project(camera);
@@ -436,6 +428,8 @@ export async function createRenderer(host, opts = {}) {
     // a long feather (80 units): with the fire right under the lip a short one cut a dark pill out
     // of the fire's glow round the paddle
     post.setBloomMask(ax, ay, bx, by, (w.paddle.h / 2 + 34) * pxPerUnit, 80 * pxPerUnit);
+    if (!menuOn) bloomProjection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    post.setBallMasks(w, alpha, bloomProjection.elements, bw, bh, !menuOn);
   }
   function leadX(w) {
     for (let i = 0; i < w.balls.length; i++) if (w.balls[i].alive && w.balls[i].sealed < 0) return w.balls[i].x;
@@ -514,6 +508,7 @@ export async function createRenderer(host, opts = {}) {
   const api = {
     setWorld(w) {
       world = w;
+      post.clearBallMasks();
       reader = reader ? resetReader(reader, w.bus, w.bus.head) : createReader(w.bus, 'render', w.bus.head);
       kiln.setMode(w.level.mode, w.field);
       rig.setWorld(w);
@@ -573,7 +568,7 @@ export async function createRenderer(host, opts = {}) {
       trail(w, alpha);
       fx.frame(dt, t);
       rig.update(t, dt, leadX(w), w.fx);
-      bloomMask(w);
+      bloomMask(w, alpha);
 
       // Under a menu the canvas sits behind a 40 px blur: draw every third frame there, or
       // every sixth while the visible title wall is moving. Gameplay still draws every frame.
@@ -581,7 +576,7 @@ export async function createRenderer(host, opts = {}) {
       if (menuSkip !== 0 || glWatch.lost) {
         stats.frameMs = performance.now() - now;
         paceFrame(stats.frameMs);
-        return;
+        return false;
       }
       const t0 = performance.now();
       for (let i = 0; i < pools.length; i++) pools[i].visible = pools[i].count > 0;
@@ -608,6 +603,7 @@ export async function createRenderer(host, opts = {}) {
         stats.worst.t = t;
         stats.worst.programs = gl.info.programs ? gl.info.programs.length : 0;
       }
+      return true;
     },
 
     resize,
@@ -653,6 +649,7 @@ export async function createRenderer(host, opts = {}) {
 
     setMenu(on) {
       menuOn = !!on;
+      if (menuOn) post.clearBallMasks();
       applyMenu();
     },
 

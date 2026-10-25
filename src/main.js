@@ -84,7 +84,8 @@ function writeSeen(seen) {
   try { localStorage.setItem(SEEN_KEY, JSON.stringify(seen)); } catch { /* private mode: hints show again */ }
 }
 
-async function boot() {
+export async function boot(startup = null) {
+  startup?.stage('save-ui');
   const save = createSave();
   const data = save.load();
   const settings = data.settings;
@@ -736,6 +737,7 @@ async function boot() {
     canReload: () => ui.current === 'title' || ui.current === 'map',
     canToast: () => app.mode !== 'play' || app.paused,
     toast: (t) => ui.toast(t),
+    diagnostic: (info) => startup?.note(info),
   });
   function installOffer() {
     if (app.installShown || !pwa.installable()) return null;
@@ -775,20 +777,24 @@ async function boot() {
 
   const early = !QA.level && !QA.bot && !QA.fixture;
   if (early) showTitle();
+  startup?.stage('renderer-adapters');
+  const task = (name, operation) => startup ? startup.task(name, operation) : Promise.resolve().then(operation);
   [renderer, ext] = await Promise.all([
-    createRenderer(view, {
+    task('renderer', () => createRenderer(view, {
       lite: liteNow(settings, app),
       reduceMotion: reduceMotion(),
       reduceTransparency: reduceTransparency(),
       debug: QA.debug,
+      fontStyleReady: startup?.fontStyleReady,
       // this session only: never written to the save (ART 15.6 D1)
       onAutoLite() {
         autoLiteTripped(app);
         if (app.mode !== 'play' || app.paused) liteToast();
       },
-    }),
-    loadAdapters(),
+    })),
+    task('adapters', () => loadAdapters({ diagnostic: (info) => startup?.note(info) })),
   ]);
+  startup?.stage('world');
   audio = createAudio({ settings: { ...settings, ...volume() }, forceMute: QA.mute });
   input = createInput(stage, renderer, { onCommand: command });
   input.onPause((reason) => {
@@ -872,6 +878,7 @@ async function boot() {
 
   /** One frame of the loop at time `now` (ms). */
   function frameStep(now) {
+    let rendered = false;
     const st = window.__kiln.stats;
     const realDt = Math.min(0.1, (now - app.last) / 1000);
     app.last = now;
@@ -901,7 +908,7 @@ async function boot() {
       }
     }
     if (w) {
-      renderer.frame(w, app.acc / SIM.DT, realDt);
+      rendered = renderer.frame(w, app.acc / SIM.DT, realDt) === true;
       readUiEvents();
       ui.hud(w);
       audio.frame(w, realDt);
@@ -910,20 +917,25 @@ async function boot() {
     if (app.flame && app.flame.frame) app.flame.frame(now / 1000);
     st.frames++;
     if (st.frames > 30) st.maxFrameMs = Math.max(st.maxFrameMs, renderer.stats.frameMs); // skip shader warm-up
+    return rendered;
   }
 
   function tick(now) {
     frameStep(now);
     requestAnimationFrame(tick);
   }
+  function firstTick(now) {
+    if (frameStep(now)) {
+      startup?.ready();
+      requestAnimationFrame(tick);
+    } else requestAnimationFrame(firstTick);
+  }
   /** QA: run n frames of dtMs by hand (a hidden preview pane gets no animation frames). */
   window.__kiln.advance = (n = 1, dtMs = 1000 / 60) => {
-    for (let i = 0; i < n; i++) frameStep(app.last + dtMs);
+    let rendered = false;
+    for (let i = 0; i < n; i++) rendered = frameStep(app.last + dtMs) || rendered;
+    if (rendered) startup?.ready();
   };
-  requestAnimationFrame(tick);
+  startup?.stage('first-frame');
+  requestAnimationFrame(firstTick);
 }
-
-boot().catch((err) => {
-  console.error('[kiln] boot failed', err);
-  uiRoot.innerHTML = '<div class="boot">Kiln could not load. Refresh the page to try again.</div>';
-});

@@ -1,5 +1,11 @@
 # Kiln credits
 
+## Software
+
+- Three.js 0.160.0 by the three.js authors, MIT License, https://threejs.org/
+
+The unchanged source, full license and provenance hashes are included in `vendor/three/0.160.0/`.
+
 ## Music
 
 - 'Machina' by Scott Buckley - released under CC-BY 4.0. www.scottbuckley.com.au

@@ -195,6 +195,8 @@ async function checkDevice(o, base, id, log) {
   const network = [];
   const shots = [];
   const checks = {};
+  const requests = new Map(), requestFailures = [];
+  let startup = null, bootFailure = null;
   const tag = `${id}${o.reduce ? '-reduce' : ''}`;
   try {
     const page = await chrome.newPage();
@@ -205,11 +207,21 @@ async function checkDevice(o, base, id, log) {
     page.on('Runtime.consoleAPICalled', (e) => {
       if (e.type === 'error') errors.push(`console.error: ${e.args.map((a) => a.value ?? a.description ?? '').join(' ').slice(0, 300)}`);
     });
+    page.on('Network.requestWillBeSent', (e) => requests.set(e.requestId, {
+      requestId: e.requestId, url: e.request.url, method: e.request.method, type: e.type,
+      initiator: e.initiator?.type || null, timestamp: e.timestamp,
+    }));
     page.on('Network.responseReceived', (e) => {
+      const request = requests.get(e.requestId);
+      if (request) Object.assign(request, { status: e.response.status, fromServiceWorker: !!e.response.fromServiceWorker });
       if (e.response.status >= 400) network.push(`${e.response.status} ${e.response.url}`);
     });
     page.on('Network.loadingFailed', (e) => {
-      if (!e.canceled) network.push(`failed (${e.errorText}) request ${e.requestId}`);
+      if (!e.canceled) {
+        const failure = { ...requests.get(e.requestId), requestId: e.requestId, error: e.errorText, blockedReason: e.blockedReason || null };
+        requestFailures.push(failure);
+        network.push(`failed (${e.errorText}) ${failure.url || '[URL not retained]'} request ${e.requestId}`);
+      }
     });
     await emulateDevice(page, device);
     if (o.reduce) {
@@ -229,7 +241,15 @@ async function checkDevice(o, base, id, log) {
       checks.boots = 'ok';
     } catch {
       checks.boots = 'the game did not start within 30 s';
+      bootFailure = await page.eval(`({ url: location.href, readyState: document.readyState, body: document.body?.innerText.slice(0, 6000) || '', startup: window.__kilnStartup?.snapshot?.() || null })`).catch((e) => ({ captureError: e.message }));
+      if (bootFailure) bootFailure.requests = [...requests.values()];
+      try {
+        const shot = join(o.out, `${tag}-boot-failure.png`);
+        writeFileSync(shot, await page.screenshot());
+        shots.push(shot);
+      } catch (error) { if (bootFailure) bootFailure.screenshotError = error.message; }
     }
+    startup = await page.eval('window.__kilnStartup?.snapshot?.() || null').catch(() => null);
     if (checks.boots === 'ok' && o.reduce) {
       const set = await page.eval(`(() => { const s = window.__kiln.save; if (!s) return false; const d = s.load(); d.settings.reduceMotion = true; d.settings.reduceTransparency = true; s.write(d); return true; })()`);
       if (set) {
@@ -322,7 +342,7 @@ async function checkDevice(o, base, id, log) {
   log(`${device.name} ${device.width}x${device.height}${o.reduce ? ' (reduce motion + transparency)' : ''}: ${failing.length ? 'FAIL' : 'PASS'}`);
   for (const [k, v] of Object.entries(checks)) if (k !== 'screensDetail') log(`  ${v === 'ok' ? 'ok  ' : 'FAIL'} ${k}${v === 'ok' ? '' : `: ${v}`}`);
   log(`  screenshots: ${shots.map((s) => relative(process.cwd(), s)).join(', ')}`);
-  return { device: id, name: device.name, size: [device.width, device.height], pass: !failing.length, checks, errors: uniqErrors, network: uniqNet, shots };
+  return { device: id, name: device.name, size: [device.width, device.height], pass: !failing.length, checks, errors: uniqErrors, network: uniqNet, requestFailures, startup, bootFailure, shots };
 }
 
 async function main() {

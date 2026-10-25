@@ -11,7 +11,7 @@
 //   kiln-runtime-v1    three.js from jsDelivr and Google Fonts (CSS and font files), cache-first
 // Navigation always answers with the cached index.html (query strings such as ?level are ignored).
 
-const BUILD = '2026-10-25T0558Z-988bd47';
+const BUILD = '2026-10-25T0647Z-d81bd05';
 const CORE = `kiln-core-${BUILD}`;
 const RUNTIME = 'kiln-runtime-v1';
 const CDN = /^https:\/\/(cdn\.jsdelivr\.net\/npm\/three@0\.160\.0\/|fonts\.googleapis\.com\/|fonts\.gstatic\.com\/)/;
@@ -84,6 +84,7 @@ const FILES = [
   'src/app/adapters.js',
   'src/app/fallbacks.js',
   'src/app/flow.js',
+  'src/app/fonts.js',
   'src/app/present.js',
   'src/app/pwa.js',
   'src/app/safe-area.js',
@@ -132,6 +133,7 @@ const FILES = [
   'src/levels/parser.js',
   'src/main.js',
   'src/render/actors.js',
+  'src/render/ball-bloom.js',
   'src/render/boss-feedback.js',
   'src/render/boss.js',
   'src/render/bricks.js',
@@ -195,32 +197,156 @@ const FILES = [
   'textures/crackle_n.png',
   'textures/obsidian.png',
   'textures/obsidian_n.png',
+  'vendor/three/0.160.0/LICENSE',
+  'vendor/three/0.160.0/PROVENANCE.json',
+  'vendor/three/0.160.0/build/three.module.js',
+  'vendor/three/0.160.0/examples/jsm/geometries/RoundedBoxGeometry.js',
+  'vendor/three/0.160.0/examples/jsm/loaders/GLTFLoader.js',
+  'vendor/three/0.160.0/examples/jsm/postprocessing/EffectComposer.js',
+  'vendor/three/0.160.0/examples/jsm/postprocessing/MaskPass.js',
+  'vendor/three/0.160.0/examples/jsm/postprocessing/OutputPass.js',
+  'vendor/three/0.160.0/examples/jsm/postprocessing/Pass.js',
+  'vendor/three/0.160.0/examples/jsm/postprocessing/RenderPass.js',
+  'vendor/three/0.160.0/examples/jsm/postprocessing/ShaderPass.js',
+  'vendor/three/0.160.0/examples/jsm/postprocessing/UnrealBloomPass.js',
+  'vendor/three/0.160.0/examples/jsm/shaders/CopyShader.js',
+  'vendor/three/0.160.0/examples/jsm/shaders/LuminosityHighPassShader.js',
+  'vendor/three/0.160.0/examples/jsm/shaders/OutputShader.js',
+  'vendor/three/0.160.0/examples/jsm/utils/BufferGeometryUtils.js',
 ];
 // FILES:END
 
-async function addAll(cache, list) {
-  // Keep the working worker and its cache when any required file is unavailable. A partial
-  // install must not activate and delete the player's complete offline build.
-  const writes = await Promise.allSettled(list.map(async (f) => {
-    const res = await fetch(f, { cache: 'reload' });
-    if (!res.ok) throw new Error(`Cannot cache ${f}: ${res.status}`);
-    await cache.put(f, res);
+const FETCH_TIMEOUT_MS = 8000;
+const RETRY_DELAY_MS = 200;
+const DIAGNOSTIC_TIMEOUT_MS = 1000;
+const transient = (status) => status === 408 || status === 429 || status >= 500;
+const critical = (url) => /\.(html|js|mjs|css)$/.test(url.pathname);
+const absolute = (request) => request ? new URL(typeof request === 'string' ? request : request.url, self.registration.scope).href : null;
+
+/** A resulting navigation client can wait for respondWith before its lookup resolves. Never
+ * make response/error delivery depend on diagnostics, including an eventual lookup rejection.
+ */
+function report(context, stage, request, { status = null, error = null, attempt = 0 } = {}) {
+  const delivery = (async () => {
+    try {
+      const message = { type: 'kiln-startup-diagnostic', build: BUILD, stage, url: absolute(request),
+        status, error: error ? String(error.message || error) : null, attempt, severity: 'warning' };
+      if (context.clientId) {
+        const client = await self.clients.get(context.clientId);
+        if (client) client.postMessage(message);
+      } else if (context.broadcast) {
+        const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+        for (const client of clients) client.postMessage(message);
+      }
+    } catch { /* client lookup, client closure and postMessage are all best effort */ }
+  })();
+  let timer;
+  const lifetime = Promise.race([delivery, new Promise((resolve) => {
+    timer = setTimeout(resolve, DIAGNOSTIC_TIMEOUT_MS);
+  })]).finally(() => clearTimeout(timer));
+  // Keep normal messages alive without pinning an install/fetch/warm event to a missing client.
+  // A late lookup may still settle, but its caught promise cannot reject the event or the page.
+  keepAlive(context, lifetime);
+}
+
+function keepAlive(context, work) {
+  // Some browsers reject a late lifetime extension. Cache work remains best effort even then;
+  // an InvalidStateError here must never replace the successful network response.
+  try { if (context.waitUntil) context.waitUntil(work); }
+  catch { /* a closed event cannot prevent online play */ }
+  return work;
+}
+
+/** Required installs keep one deadline through headers and body, before any cache write starts. */
+async function boundedFetch(request, init, completeBody = false) {
+  const controller = new AbortController();
+  let timer, response, receivingBody = false;
+  const timeout = new Promise((resolve, reject) => {
+    timer = setTimeout(() => {
+      const error = new Error(`Fetch timed out after ${FETCH_TIMEOUT_MS} ms`);
+      error.name = 'TimeoutError';
+      reject(error);
+      controller.abort();
+    }, FETCH_TIMEOUT_MS);
+  });
+  const transfer = (async () => {
+    response = await fetch(request, { ...init, signal: controller.signal });
+    if (completeBody && response.ok) {
+      receivingBody = true;
+      // Reading a clone keeps the original status, headers, URL and bytes intact. Only required
+      // installation fetches buffer a body; normal runtime responses continue to stream.
+      await response.clone().arrayBuffer();
+    }
+    return response;
+  })();
+  try { return await Promise.race([transfer, timeout]); }
+  catch (error) {
+    controller.abort();
+    if (!receivingBody) throw error;
+    const failure = new Error(`Response body failed: ${error.message || error}`);
+    failure.name = error.name || 'Error';
+    failure.phase = 'body';
+    failure.status = response.status;
+    throw failure;
+  }
+  finally { clearTimeout(timer); }
+}
+
+/** Exactly two attempts total. A real 404 is returned once; only transient failures retry. */
+async function fetchCritical(request, init, context, stage, completeBody = false) {
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    let response;
+    try { response = await boundedFetch(request, init, completeBody); }
+    catch (error) {
+      report(context, error.phase === 'body' ? `${stage}-body` : stage, request,
+        { error, attempt, status: Number.isFinite(error.status) ? error.status : null });
+      if (attempt === 2) throw error;
+    }
+    if (response) {
+      if (response.ok) return response;
+      report(context, stage, request, { status: response.status, attempt });
+      if (attempt === 2 || !transient(response.status)) return response;
+    }
+    await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+  }
+}
+
+async function addAll(cache, list, context) {
+  // Every write settles before cleanup, including late successes after another required file
+  // fails. A partial update never takes over or removes the previous complete offline build.
+  const writes = await Promise.allSettled(list.map(async (file) => {
+    const response = await fetchCritical(file, { cache: 'reload' }, context, 'install-fetch', true);
+    if (!response.ok) throw new Error(`Cannot cache ${file}: ${response.status}`);
+    try { await cache.put(file, response); }
+    catch (error) {
+      report(context, 'install-cache-write', file, { status: response.status, error });
+      throw error;
+    }
   }));
-  const failed = writes.find((r) => r.status === 'rejected');
+  const failed = writes.find((result) => result.status === 'rejected');
   if (failed) throw failed.reason;
 }
 
 self.addEventListener('install', (event) => {
+  const context = { broadcast: true, waitUntil: (work) => event.waitUntil(work) };
   event.waitUntil((async () => {
-    const existed = await caches.has(CORE);
-    const cache = await caches.open(CORE);
+    let existed, cache;
     try {
-      await addAll(cache, ['./', ...FILES.filter((f) => !lazy(f))]);
-    } catch (err) {
-      // All writes have settled before cleanup. Never delete an already-existing cache when a
-      // local ?sw=1 edit deliberately reuses its BUILD stamp.
-      if (!existed) await caches.delete(CORE);
-      throw err;
+      existed = await caches.has(CORE);
+      cache = await caches.open(CORE);
+    } catch (error) {
+      report(context, 'install-cache-open', null, { error });
+      throw error;
+    }
+    try { await addAll(cache, ['./', ...FILES.filter((file) => !lazy(file))], context); }
+    catch (error) {
+      // Reused BUILD stamps can already have a complete cache. Never delete that cache, even
+      // when a local development install fails. Cache API denial is an install warning only.
+      if (!existed) {
+        try { await caches.delete(CORE); }
+        catch (cleanupError) { report(context, 'install-cache-delete', null, { error: cleanupError }); }
+      }
+      throw error;
     }
     await self.skipWaiting();
   })());
@@ -234,90 +360,104 @@ self.addEventListener('activate', (event) => {
   })());
 });
 
-async function fromCache(request) {
-  return (await caches.match(request, { ignoreSearch: true })) || null;
+async function fromCache(name, request, context, ignoreSearch = false) {
+  // Read only this worker's build, or the explicit external-resource cache. Global match could
+  // accidentally serve a module from another worker's incomplete or older build.
+  try {
+    const cache = await caches.open(name);
+    const hit = await cache.match(request, { ignoreSearch });
+    if (hit && !hit.ok && hit.type !== 'opaque') {
+      report(context, 'cache-response', request, { status: hit.status });
+      return null;
+    }
+    return hit || null;
+  } catch (error) {
+    report(context, 'cache-read', request, { error });
+    return null;
+  }
 }
 
-async function runtime(request) {
-  const hit = await caches.match(request);
+async function remember(name, request, response, context) {
+  let cache;
+  try { cache = await caches.open(name); }
+  catch (error) { report(context, 'cache-open', request, { status: response.status, error }); return; }
+  try { await cache.put(request, response); }
+  catch (error) { report(context, 'cache-write', request, { status: response.status, error }); }
+}
+
+async function runtime(request, context) {
+  const hit = await fromCache(RUNTIME, request, context);
   if (hit) return hit;
-  const res = await fetch(request);
-  if (res.ok || res.type === 'opaque') {
-    const cache = await caches.open(RUNTIME);
-    cache.put(request, res.clone()).catch(() => {});
-  }
-  return res;
+  const response = await fetch(request);
+  if (response.ok || response.type === 'opaque') keepAlive(context, remember(RUNTIME, request, response.clone(), context));
+  return response;
 }
 
 self.addEventListener('fetch', (event) => {
-  const req = event.request;
-  if (req.method !== 'GET') return;
-  const url = new URL(req.url);
+  const request = event.request;
+  if (request.method !== 'GET') return;
+  const url = new URL(request.url);
+  const context = { clientId: event.clientId || event.resultingClientId, waitUntil: (work) => event.waitUntil(work) };
   if (url.origin === self.location.origin) {
-    if (req.mode === 'navigate') {
+    if (request.mode === 'navigate') {
       event.respondWith((async () => {
-        const cached = (await caches.match('index.html', { ignoreSearch: true })) || (await caches.match('./', { ignoreSearch: true }));
-        if (cached) return cached;
-        return fetch(req);
+        const cached = (await fromCache(CORE, 'index.html', context, true)) || (await fromCache(CORE, './', context, true));
+        return cached || fetchCritical(request, undefined, context, 'navigate-fetch');
       })());
       return;
     }
-    if (req.headers.has('range')) {
-      // media range requests want a 206 from the network; the cached whole file only when offline
-      event.respondWith(fetch(req).catch(async () => (await fromCache(req)) || Response.error()));
+    if (request.headers.has('range')) {
+      // Keep media's network 206 response; use the cached whole file only when offline.
+      event.respondWith(fetch(request).catch(async () => (await fromCache(CORE, request, context, true)) || Response.error()));
       return;
     }
     event.respondWith((async () => {
-      const hit = await fromCache(req);
+      const hit = await fromCache(CORE, request, context, true);
       if (hit) return hit;
-      const res = await fetch(req);
-      if (res.ok && url.pathname.match(/\.(js|mjs|css|png|webp|jpg|glb|m4a|mp3|ogg|wav|json|webmanifest)$/)) {
-        const cache = await caches.open(CORE);
-        cache.put(req, res.clone()).catch(() => {});
-      }
-      return res;
+      const response = critical(url) ? await fetchCritical(request, undefined, context, 'fetch') : await fetch(request);
+      if (response.ok && url.pathname.match(/\.(js|mjs|css|png|webp|jpg|glb|m4a|mp3|ogg|wav|json|webmanifest)$/))
+        keepAlive(context, remember(CORE, request, response.clone(), context));
+      return response;
     })());
     return;
   }
-  if (CDN.test(req.url)) event.respondWith(runtime(req));
+  if (CDN.test(request.url)) event.respondWith(runtime(request, context));
 });
 
 self.addEventListener('message', (event) => {
-  const msg = event.data || {};
-  if (msg.type === 'cache-urls' && Array.isArray(msg.urls)) {
+  const message = event.data || {};
+  const context = { clientId: event.source && event.source.id, waitUntil: (work) => event.waitUntil(work) };
+  if (message.type === 'cache-urls' && Array.isArray(message.urls)) {
     event.waitUntil((async () => {
-      const cache = await caches.open(RUNTIME);
-      // the page lists what Resource Timing saw; Chrome leaves the font files out of it, so the
-      // Google Fonts stylesheet adds its Latin faces here (G's pwacheck: offline text kept Inter)
-      const list = msg.urls.slice();
+      // Resource Timing misses some font files; include the stylesheet's Latin faces as before.
+      const list = message.urls.slice();
       for (let i = 0; i < list.length; i++) {
-        const u = list[i];
-        if (!CDN.test(u)) continue;
+        const url = list[i];
+        if (!CDN.test(url)) continue;
         try {
-          let res = await cache.match(u);
-          if (!res) {
-            res = await fetch(u, { mode: 'cors', credentials: 'omit' });
-            if (!res.ok) continue;
-            await cache.put(u, res.clone());
+          let response = await fromCache(RUNTIME, url, context);
+          if (!response) {
+            response = await fetch(url, { mode: 'cors', credentials: 'omit' });
+            if (!response.ok) continue;
+            await remember(RUNTIME, url, response.clone(), context);
           }
-          if (u.startsWith('https://fonts.googleapis.com/')) {
-            for (const face of (await res.text()).split('@font-face').slice(1)) {
-              if (!/unicode-range:\s*U\+0000-00FF/i.test(face)) continue; // Latin only (2 files)
-              const m = /url\((https:\/\/fonts\.gstatic\.com\/[^)\s]+)\)/.exec(face);
-              if (m && !list.includes(m[1])) list.push(m[1]);
+          if (url.startsWith('https://fonts.googleapis.com/')) {
+            for (const face of (await response.text()).split('@font-face').slice(1)) {
+              if (!/unicode-range:\s*U\+0000-00FF/i.test(face)) continue;
+              const match = /url\((https:\/\/fonts\.gstatic\.com\/[^)\s]+)\)/.exec(face);
+              if (match && !list.includes(match[1])) list.push(match[1]);
             }
           }
-        } catch { /* offline: next visit */ }
+        } catch { /* optional font warm-up can wait for the next visit */ }
       }
     })());
-  } else if (msg.type === 'warm') {
+  } else if (message.type === 'warm') {
     event.waitUntil((async () => {
-      const cache = await caches.open(CORE);
-      for (const f of FILES.filter(lazy)) {
-        if (await cache.match(f)) continue;
+      for (const file of FILES.filter(lazy)) {
+        if (await fromCache(CORE, file, context)) continue;
         try {
-          const res = await fetch(f);
-          if (res.ok) await cache.put(f, res);
+          const response = await fetch(file);
+          if (response.ok) await remember(CORE, file, response, context);
         } catch { return; }
       }
     })());
