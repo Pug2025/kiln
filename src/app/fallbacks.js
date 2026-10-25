@@ -8,19 +8,19 @@ export { FORGE_ITEMS, forgePrice } from '../economy/forge.js';
 
 /** Gate doors (B's twistsFor replaces these). */
 export const TWISTS = [
-  { id: 'moving', name: 'Moving rows', fact: 'Two rows slide' },
-  { id: 'armoured', name: 'Armour', fact: '1 in 3 plain bricks gains armour' },
+  { id: 'moving', name: 'Moving rows', fact: 'Rows slide.' },
+  { id: 'armoured', name: 'Armour', fact: 'Some bricks have armour.' },
 ];
 
-/** Door facts by twist id, read off B's applyTwist rules (B's doors carry a label only). */
+/** Single-part fallback facts; shipped combined gates describe the whole trade themselves. */
 export const TWIST_FACTS = {
-  moving: 'Two rows slide',
-  armoured: '1 in 3 plain bricks gains armour',
-  heavier: 'Plain and numbered bricks need 1 more hit',
-  hot: 'Ball starts one speed tier faster',
-  sentry: 'One more sentry',
-  explosive: 'Adds explosive bricks',
-  rich: '1 in 8 plain bricks carries a drop',
+  moving: 'Rows slide.',
+  armoured: 'Some bricks have armour.',
+  heavier: 'Bricks take another hit.',
+  hot: 'The ball starts faster.',
+  sentry: 'Another sentry.',
+  explosive: 'Some bricks explode.',
+  rich: 'More powers inside.',
 };
 
 /** PLAN §7 "Credits", exact lines (E's src/audio/credits.js replaces these). */

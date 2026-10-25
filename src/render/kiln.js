@@ -8,7 +8,7 @@ import { FIELD, RING, HORIZONTAL } from '../core/constants.js';
 import { PAL, PAL_VEC3 } from './materials.js';
 import { LOOK } from './look.js';
 import { PLAIN_VERT, HAZE_FRAG, BACK_VERT, BACK_FRAG, SHAFT_FRAG, withOutput } from './shaders.js';
-import { CEILING_ART, ceilingLayout, isCeilingHit } from './ceiling.js';
+import { CEILING_ART, ceilingLayout, lintelPiece, ceilingContact, isCeilingHit } from './ceiling.js';
 
 const FW = FIELD.W, FH = FIELD.H;
 const HH_ = FIELD.H / 2;
@@ -214,6 +214,8 @@ export function createKiln(scene, M) {
   const wallR = new THREE.Mesh(sideGeo, M.wallGlass);
   const wallT = new THREE.Mesh(endGeo, M.wallGlass);
   const wallB = new THREE.Mesh(endGeo, M.wallGlass);
+  wallL.name = 'kiln-wall-left'; wallR.name = 'kiln-wall-right';
+  wallT.name = 'kiln-wall-top'; wallB.name = 'kiln-wall-bottom';
   wallL.position.set(-(FW / 2 + 6), 0, -6);
   wallR.position.set(FW / 2 + 6, 0, -6);
   wallT.position.set(0, FH / 2 + 6, -6);
@@ -240,31 +242,58 @@ export function createKiln(scene, M) {
   trackL.position.set(HORIZONTAL.PADDLE_X - FW / 2, 0, -10);
   frame.add(wallL, wallR, wallT, wallB, lipB, lipL, ringLip, track, trackL);
 
-  // ART 12a.1: this edge is the real collision wall, never the old field perimeter. Its glass
-  // pane separates the decorative painting from the ball's path. Meshes are reused each level.
+  // ART 12a.1: the collision edge is a forged lintel in the same metal as the sill. The continuous
+  // rail meets the ball; recessed joints divide its cap without holes in the visible bounce edge.
+  const sillMat = new THREE.MeshStandardMaterial({ color: 0x1b1d21, roughness: 0.55, metalness: 0.7, envMapIntensity: 0.35 });
   const ceiling = ceilingLayout('ring', null);
-  const ceilingBar = new THREE.Mesh(
-    new RoundedBoxGeometry(FW + 24, CEILING_ART.BAR, CEILING_ART.DEPTH, 2, 2), M.titaniumP,
+  // Match the sill finish, but keep plain and instanced program state on separate materials.
+  const ceilingBar = new THREE.InstancedMesh(
+    new RoundedBoxGeometry(CEILING_ART.SEGMENT, CEILING_ART.BAR, CEILING_ART.DEPTH, 2, 2),
+    sillMat.clone(), 1 + Math.ceil((FH + 24) / CEILING_ART.SEGMENT),
   );
+  ceilingBar.name = 'kiln-lintel';
   ceilingBar.renderOrder = 6;
-  const ceilingPane = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), M.wallGlass);
-  ceilingPane.position.z = -14;
-  ceilingPane.renderOrder = 5;
-  const glintMat = new THREE.MeshBasicMaterial({
-    color: 0xc6d4e0, transparent: true, opacity: 0, depthWrite: false,
+  // Only a local, soft shadow above the lintel. No pane or rectangle covers the painting.
+  // The seam and brief contact spark stay below bloom and share this single narrow plane.
+  const lintelMat = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, fog: false,
+    blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
+    uniforms: {
+      uHeatLo: { value: PAL_VEC3.heatLo }, uBase: { value: PAL_VEC3.base },
+      uLength: { value: FW + 24 }, uHit: { value: new THREE.Vector3(0, 14, 0) },
+    },
+    vertexShader: PLAIN_VERT,
+    fragmentShader: withOutput(`precision highp float; varying vec2 vUv;
+      uniform vec3 uHeatLo, uBase, uHit; uniform float uLength;
+      void main(){
+        float d = vUv.y * ${(CEILING_ART.SHADE + 1).toFixed(1)} - 1.0;
+        float edge = smoothstep(0.0, 0.02, vUv.x) * (1.0 - smoothstep(0.98, 1.0, vUv.x));
+        float shade = smoothstep(${(CEILING_ART.BAR - 2).toFixed(1)}, ${(CEILING_ART.BAR + 2).toFixed(1)}, d)
+          * pow(1.0 - smoothstep(${CEILING_ART.BAR.toFixed(1)}, ${CEILING_ART.SHADE.toFixed(1)}, d), 2.0) * 0.22;
+        float seam = 1.0 - smoothstep(0.25, 0.9, abs(d));
+        float along = (vUv.x - 0.5) * uLength;
+        float spark = pow(max(0.0, 1.0 - abs(along - uHit.x) / (uHit.y * 0.5)), 3.0) * uHit.z * seam;
+        float a = max(shade, seam * 0.55 + spark * 0.3) * edge;
+        vec3 col = (uBase * shade + uHeatLo * (seam * 0.10 + spark * 0.26)) * edge;
+        gl_FragColor = vec4(col, a);
+      }`),
   });
-  const ceilingGlint = new THREE.Mesh(new THREE.PlaneGeometry(1, 2), glintMat);
-  ceilingGlint.position.z = CEILING_ART.DEPTH / 2 + 0.1;
-  ceilingGlint.renderOrder = 7;
-  ceilingBar.visible = ceilingPane.visible = ceilingGlint.visible = false;
-  frame.add(ceilingBar, ceilingPane, ceilingGlint);
-  let glintT = -1e9;
-  let glintAt = 0;
+  const ceilingGlow = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), lintelMat);
+  ceilingGlow.name = 'kiln-lintel-warmth';
+  ceilingGlow.position.z = CEILING_ART.DEPTH / 2 + 0.1;
+  ceilingGlow.renderOrder = 7;
+  ceilingBar.visible = ceilingGlow.visible = false;
+  frame.add(ceilingBar, ceilingGlow);
+  const lintelPart = {}, contact = {};
+  let contactT = -1e9, contactAt = 0;
+  function updateContact(age) {
+    ceilingContact(ceiling, contactAt, age, contact);
+    lintelMat.uniforms.uHit.value.set(contact.at, contact.length, contact.alpha);
+  }
 
   // ---- the kiln lip (ART 12b): a dark metal sill between the fire and the paddle that hides the
   // flame tips. Bottom mode: field y 1022..1044 (the paddle's lower edge is 1008); other modes put
   // it just under the field. It sits behind the ball's plane (z -38..-10), in front of the fire.
-  const sillMat = new THREE.MeshStandardMaterial({ color: 0x1b1d21, roughness: 0.55, metalness: 0.7, envMapIntensity: 0.35 });
   const sill = new THREE.Mesh(new RoundedBoxGeometry(FW + 40, 22, 28, 2, 3), sillMat);
   sill.position.z = -24;
   const sillEdge = new THREE.Mesh(new THREE.PlaneGeometry(FW + 30, 0.8), new THREE.MeshBasicMaterial({ color: 0x3a3e45 }));
@@ -275,7 +304,7 @@ export function createKiln(scene, M) {
 
   return {
     hemi, key, rim, fireLight, deepLight, backMat, haze, shaftMat, bed, plate, frame,
-    ceiling, ceilingBar, ceilingPane, ceilingGlint,
+    ceiling, ceilingBar, ceilingGlow,
 
     /** Frame pieces per field mode (ART 7; ring/left variants are C calls). */
     /** World y the flame tips must stay under (the lip line). */
@@ -285,17 +314,31 @@ export function createKiln(scene, M) {
 
     setMode(mode, field) {
       ceilingLayout(mode, field, ceiling);
-      ceilingBar.visible = ceiling.active;
-      ceilingPane.visible = ceiling.active && ceiling.paneW > 0 && ceiling.paneH > 0;
-      ceilingGlint.visible = false;
-      glintT = -1e9;
+      ceilingBar.visible = ceilingGlow.visible = ceiling.active;
+      contactT = -1e9;
+      updateContact(1);
       ceilingBar.position.set(ceiling.barX - FW / 2, HH_ - ceiling.barY, 0);
-      ceilingBar.rotation.z = ceiling.vertical ? Math.PI / 2 : 0;
-      ceilingBar.scale.x = ceiling.barLength / (FW + 24);
-      ceilingPane.position.x = ceiling.paneX - FW / 2;
-      ceilingPane.position.y = HH_ - ceiling.paneY;
-      ceilingPane.scale.set(ceiling.paneW, ceiling.paneH, 1);
-      ceilingGlint.rotation.z = ceiling.vertical ? Math.PI / 2 : 0;
+      ceilingBar.rotation.z = ceiling.vertical ? -Math.PI / 2 : 0;
+      // The renderer enables every nonempty instance pool before drawing, so inactive means zero.
+      ceilingBar.count = ceiling.active ? 1 + ceiling.segments : 0;
+      for (let i = 0; i < ceilingBar.count; i++) {
+        lintelPiece(ceiling, i, lintelPart);
+        m4.makeScale(lintelPart.w / CEILING_ART.SEGMENT, lintelPart.h / CEILING_ART.BAR, lintelPart.d / CEILING_ART.DEPTH);
+        m4.setPosition(lintelPart.x, lintelPart.y, 0);
+        ceilingBar.setMatrixAt(i, m4);
+      }
+      ceilingBar.instanceMatrix.needsUpdate = true;
+      ceilingBar.computeBoundingSphere();
+      const offset = (CEILING_ART.SHADE - 1) / 2;
+      ceilingGlow.position.x = (ceiling.vertical ? ceiling.edge + offset : FW / 2) - FW / 2;
+      ceilingGlow.position.y = HH_ - (ceiling.vertical ? FH / 2 : ceiling.edge - offset);
+      ceilingGlow.rotation.z = ceilingBar.rotation.z;
+      ceilingGlow.scale.set(ceiling.barLength, CEILING_ART.SHADE + 1, 1);
+      lintelMat.uniforms.uLength.value = ceiling.barLength;
+      wallL.scale.y = wallR.scale.y = ceiling.wallH / (FH + 24);
+      wallL.position.y = wallR.position.y = HH_ - ceiling.wallY;
+      wallT.scale.x = wallB.scale.x = ceiling.wallW / (FW + 24);
+      wallT.position.x = wallB.position.x = ceiling.wallX - FW / 2;
       const top = SILL[mode] ?? SILL.bottom; // field y of the sill's top edge
       sill.position.y = HH_ - (top + 11);
       sillEdge.position.y = HH_ - top - 0.4;
@@ -311,14 +354,12 @@ export function createKiln(scene, M) {
       track.visible = mode === 'ring';
     },
 
-    /** Cool light along the titanium at contact; a ceiling hit never emits warm rupture sparks. */
+    /** A short warm contact spark follows the forged edge, without free particles or bloom. */
     wallHit(wall, x, y, t) {
       if (!isCeilingHit(ceiling, wall)) return false;
-      glintT = t;
-      glintAt = ceiling.vertical ? y : x;
-      ceilingGlint.position.x = ceiling.vertical ? ceiling.edge + 1 - FW / 2 : x - FW / 2;
-      ceilingGlint.position.y = ceiling.vertical ? HH_ - y : HH_ - ceiling.edge + 1;
-      ceilingGlint.visible = true;
+      contactT = t;
+      contactAt = ceiling.vertical ? y : x;
+      updateContact(0);
       return true;
     },
 
@@ -332,17 +373,7 @@ export function createKiln(scene, M) {
 
     /** fi = the one fire number; glowMul from the wall firing. */
     update(t, fi, glowMul, breakBoost) {
-      const age = (t - glintT) / CEILING_ART.GLINT_S;
-      ceilingGlint.visible = ceiling.active && age >= 0 && age < 1;
-      if (ceilingGlint.visible) {
-        const length = 55 + 95 * age;
-        const extent = ceiling.vertical ? FH : FW;
-        const along = Math.max(length / 2 - 12, Math.min(extent + 12 - length / 2, glintAt));
-        ceilingGlint.scale.x = length;
-        if (ceiling.vertical) ceilingGlint.position.y = HH_ - along;
-        else ceilingGlint.position.x = along - FW / 2;
-        glintMat.opacity = 0.7 * (1 - age) * (1 - age);
-      }
+      updateContact((t - contactT) / CEILING_ART.HIT_S);
       backMat.uniforms.uGlow.value = (0.6 + 0.5 * fi) * glowMul;
       deepLight.intensity = 30000 + 30000 * fi;
       bedMat.opacity = 0.5 + 0.35 * fi;

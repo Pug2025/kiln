@@ -12,6 +12,6 @@ export function card(data) {
     h('div.kicker', h('span', data.kicker || `Level ${pad2(data.n)}`), kind ? h('span.tag', kind) : null),
     h('div.title', data.name || ''),
     data.adds ? h('div.adds', h('span', 'Adds'), ` ${data.adds}`) : null,
-    data.door ? h('div.adds', h('span', 'Door'), ` ${data.door}`) : null,
+    data.door ? h('div.adds', h('span', 'Wall'), ` ${data.door}`) : null,
     data.hint ? h('div.sub', data.hint) : null);
 }

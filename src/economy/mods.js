@@ -13,17 +13,17 @@ export const MOD = Object.freeze({
 /** The pool. `fact` is the one short line on the pick card (information, never an instruction). */
 export const MODS = Object.freeze([
   { id: MOD.LIFE, key: 'life', name: 'Extra life', fact: '+1 life', repeat: true },
-  { id: MOD.BIG_EMBERS, key: 'big-embers', name: 'Big embers', fact: 'Each ember gives 6 HEAT' },
-  { id: MOD.SHIELD, key: 'shield', name: 'Shield', fact: 'Starts each level with 1 shield' },
-  { id: MOD.SLOW_START, key: 'slow-start', name: 'Slow start', fact: 'Slower balls for 10 s after each launch' },
-  { id: MOD.DOUBLE_DROPS, key: 'double-drops', name: 'Rich walls', fact: 'Twice the chance of a power drop' },
-  { id: MOD.PIERCE, key: 'pierce', name: 'Pierce', fact: 'Balls pass through 1 brick after launch' },
-  { id: MOD.LONG_CATCH, key: 'long-catch', name: 'Long catch', fact: 'Catch drops last 35 s' },
-  { id: MOD.CHEAP_PULL, key: 'cheap-pull', name: 'Cheap Pull', fact: 'Pull uses 26 HEAT per second' },
-  { id: MOD.BURST, key: 'burst', name: 'Burst', fact: '1 in 10 bricks drops twice the embers' },
-  { id: MOD.MAGNET, key: 'magnet', name: 'Magnet', fact: 'Nearby embers curve toward the paddle' },
-  { id: MOD.COMBO_FLOOR, key: 'combo-floor', name: 'Combo floor', fact: 'Score multiplier stays at ×2 or higher' },
-  { id: MOD.MORE_LASERS, key: 'more-lasers', name: 'More lasers', fact: 'Laser drops refill to 20 shots' },
+  { id: MOD.BIG_EMBERS, key: 'big-embers', name: 'Big embers', fact: 'Embers fill HEAT faster.' },
+  { id: MOD.SHIELD, key: 'shield', name: 'Shield', fact: 'Start each level with a shield.' },
+  { id: MOD.SLOW_START, key: 'slow-start', name: 'Slow start', fact: 'Each launch slows balls for 10 seconds.' },
+  { id: MOD.DOUBLE_DROPS, key: 'double-drops', name: 'Rich walls', fact: 'More powers drop.' },
+  { id: MOD.PIERCE, key: 'pierce', name: 'Pierce', fact: 'Balls pierce a brick on launch or paddle hits.' },
+  { id: MOD.LONG_CATCH, key: 'long-catch', name: 'Long catch', fact: 'Catch lasts for 35 seconds.' },
+  { id: MOD.CHEAP_PULL, key: 'cheap-pull', name: 'Cheap Pull', fact: 'Pull drains HEAT more slowly.' },
+  { id: MOD.BURST, key: 'burst', name: 'Burst', fact: 'Some bricks drop double embers.' },
+  { id: MOD.MAGNET, key: 'magnet', name: 'Magnet', fact: 'Nearby embers drift to the paddle.' },
+  { id: MOD.COMBO_FLOOR, key: 'combo-floor', name: 'Steady combo', fact: 'Your multiplier never drops below ×2.' },
+  { id: MOD.MORE_LASERS, key: 'more-lasers', name: 'More shots', fact: 'Laser drops refill to 20 shots.' },
 ].map(Object.freeze));
 
 export const MOD_COUNT = MODS.length;

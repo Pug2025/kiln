@@ -504,8 +504,8 @@ async function boot() {
       tag: o.raw?.cost > 0 ? `Ready at ${o.raw.cost} HEAT` : '',
     })), kicker: 'Choose an Overload', sub: 'Replaces the Shield button. Firing empties HEAT.', confirm: 'Choose' };
     return {
-      kind, options: ext.twistsFor(def.n), kicker: `Next  ·  ${String(def.n).padStart(2, '0')} ${def.name}`,
-      sub: def.adds ? `Adds ${def.adds}.` : '', confirm: 'Enter',
+      kind, options: ext.twistsFor(def.n), kicker: 'Choose the next wall',
+      sub: `Level ${String(def.n).padStart(2, '0')} · ${def.name}`, confirm: 'Enter',
     };
   }
 

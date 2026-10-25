@@ -73,9 +73,9 @@ test('gate transforms preserve loaded carrier material/power and count only actu
     if (door.id.startsWith('heavier+')) {
       const before = new Map(parseLevel(def).bricks.map((b) => [`${b.row},${b.col}`, b.hp]));
       const changed = parseLevel(out).bricks.filter((b) => b.hp === before.get(`${b.row},${b.col}`) + 1).length;
-      assert.ok(door.fact.startsWith(`${changed} take 1 more hit, `), `${def.id}: ${door.fact}`);
+      assert.equal(door.counts.heavier, changed, `${def.id}: the cost counts only actual harder bricks`);
     }
-    assert.ok(door.fact.length <= 40, `${def.id}: short fact`);
+    assert.equal(door.fact, '', `${def.id}: counts stay outside the trade sentence`);
   }
 });
 

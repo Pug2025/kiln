@@ -66,7 +66,7 @@ test('player-facing text: Kiln words only, and the facts are true', () => {
   assert.match(getLevel(18).hint, new RegExp(`${SENTRY_SPEC[0].hp} hits[;,] bombers ${SENTRY_SPEC[1].hp}`));
   const heavier = applyTwist(level(['a2A9E?X.....', 'aaaaaaaaa...']), 'heavier');
   assert.equal(heavier.rows[0], '23A9E?X.....', 'plain and numbered bricks take 1 more hit; the rest are as they were');
-  // every door's fact is in plain words and its counts are true of the twisted wall
+  // Every trade keeps its measured effect counts outside the player-facing sentence.
   const count = (d, ch) => d.rows.join('').split(ch).length - 1;
   for (let n = 1; n <= 30; n++) {
     for (const d of twistsFor(n)) {
@@ -75,19 +75,21 @@ test('player-facing text: Kiln words only, and the facts are true', () => {
       const more = (ch) => count(out, ch) - count(base, ch);
       const hpBefore = new Map(parseLevel(base).bricks.map((b) => [`${b.row},${b.col}`, b.hp]));
       const harder = parseLevel(out).bricks.filter((b) => b.hp === hpBefore.get(`${b.row},${b.col}`) + 1).length;
-      const say = (k, one, many) => (k === 1 ? `1 ${one}` : `${k} ${many}`);
       const want = {
-        moving: base.mode === 'left' ? '2 columns slide' : '2 rows slide',
-        armoured: say(more('A'), 'brick armoured', 'bricks armoured'),
-        heavier: `${harder} take 1 more hit`,
-        explosive: say(more('E'), 'explodes', 'explode'),
-        rich: say(more('?'), 'carries a drop', 'carry a drop'),
+        moving: (out.motion || []).length - (base.motion || []).length,
+        armoured: more('A'),
+        heavier: harder,
+        explosive: more('E'),
+        rich: more('?'),
       };
-      assert.equal(d.fact, `${want[cost]}, ${want[pay]}`, `door into ${n}`);
+      assert.deepEqual(d.counts, { [cost]: want[cost], [pay]: want[pay] }, `door into ${n}`);
       if (cost === 'moving') assert.equal((out.motion || []).length - (base.motion || []).length, 2, `door into ${n}: two more sliding lines`);
       if (cost === 'heavier') assert.ok(!/[abc]/.test(out.rows.join('').replace(/\?/g, '')) || more('2') > 0, `door into ${n}: heavier bricks`);
       assert.ok(more(pay === 'explosive' ? 'E' : '?') > 0, `door into ${n}: the payoff is in the wall`);
-      assert.ok(!/\b(in \d+|plain in)\b/.test(d.fact), `door into ${n}: counts, not odds ("${d.fact}")`);
+      assert.ok(!/[\d+]|\b(twist|cost|payoff|heavier|rich)\b/i.test(d.label), `door into ${n}: player words only`);
+      const first = { moving: base.mode === 'left' ? 'Columns' : 'Rows', armoured: 'Armoured', heavier: 'Bricks' };
+      assert.ok(d.label.startsWith(first[cost]), `door into ${n}: cost comes first`);
+      assert.match(d.label, pay === 'explosive' ? /explode\.$/ : /powers inside\.$/, `door into ${n}: names the actual reward`);
     }
   }
   assert.ok(!/full heat/i.test(getLevel(22).hint), 'an Overload is ready at its cost, not at a full meter');
@@ -155,8 +157,8 @@ test('gates from 13, never in front of a bonus or boss level; two doors that pas
     for (const t of doors) {
       const parts = twistParts(t.id);
       assert.ok(parts && parts.length === 2 && TWISTS[parts[0]].kind === 'cost' && TWISTS[parts[1]].kind === 'pay', `${n} ${t.id}: every door is a trade, one cost and one payoff`);
-      assert.ok(t.label.length <= 28 && t.label.includes(' + '), `${n}: "${t.label}" names the cost and the payoff`);
-      assert.ok(typeof t.fact === 'string' && t.fact.length > 0 && t.fact.length <= 40, `${n} ${t.id}: one short fact under the door, 40 characters at most (${t.fact.length})`);
+      assert.ok(t.label.length <= 50 && t.label.endsWith('.'), `${n}: "${t.label}" is one short trade sentence`);
+      assert.equal(t.fact, '', `${n} ${t.id}: no second line repeating the trade`);
       const twisted = applyTwist(getLevel(n), t.id);
       assert.equal(twisted.twist, t.id);
       assert.notDeepEqual(twisted, getLevel(n));

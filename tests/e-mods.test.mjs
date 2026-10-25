@@ -21,7 +21,8 @@ test('twelve Mods, ids match their place, short facts', () => {
   MODS.forEach((m, i) => {
     assert.equal(m.id, i);
     assert.ok(m.name.length <= 14, m.name);
-    assert.ok(m.fact.length <= 40, m.fact);
+    assert.ok(m.fact.length <= 48, m.fact);
+    assert.ok(!/\b(unleash|powerful|ultimate|epic|seamless)\b|\u2014/i.test(m.fact), m.fact);
   });
   assert.deepEqual(PICKS.MOD_LEVELS.filter(isModLevel), [13, 16, 19, 23, 26, 29]);
   assert.equal(isModLevel(14), false);

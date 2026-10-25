@@ -1,15 +1,16 @@
 // The camera and the visible edge use the same immutable, simulation-owned field limits.
 import { test, assert, near } from './lib.mjs';
+import { register } from 'node:module';
 import { FIELD } from '../src/core/constants.js';
-import { CEILING_ART, ceilingLayout, isCeilingHit } from '../src/render/ceiling.js';
+import { CEILING_ART, ceilingLayout, lintelPiece, ceilingContact, isCeilingHit } from '../src/render/ceiling.js';
 import { createPose, fitCamera, fieldBounds, fieldToScreen, screenToFieldPose } from '../src/render/fit.js';
 
-test('bottom ceiling: titanium ends on the actual bounce edge, glass sits entirely above it', () => {
+test('bottom lintel meets the actual bounce edge and leaves the painting band unchanged', () => {
   for (const ceilingY of [90, 300, 420, 600]) {
     const layout = ceilingLayout('bottom', { ceilingY, farX: FIELD.W });
     assert.ok(layout.active && !layout.vertical);
     near(layout.barY + CEILING_ART.BAR / 2, ceilingY, 0, 'inner edge matches physics');
-    near(layout.paneY + layout.paneH / 2, ceilingY, 0, 'glass ends on ceiling');
+    near(layout.wallY - layout.wallH / 2, ceilingY - 12, 0, 'outline ends inside the lintel');
     assert.equal(layout.y0, Math.max(0, ceilingY - CEILING_ART.BAND));
     assert.equal(layout.y1, FIELD.H);
     assert.ok(ceilingY - layout.y0 <= CEILING_ART.BAND, 'only a modest art band is framed');
@@ -18,12 +19,12 @@ test('bottom ceiling: titanium ends on the actual bounce edge, glass sits entire
   }
 });
 
-test('left far wall: titanium begins on the bounce edge and the pane is beyond it', () => {
+test('left lintel meets the far bounce edge and ends the outline inside its cap', () => {
   for (const farX of [450, 570, 630, 720]) {
     const layout = ceilingLayout('left', { ceilingY: 0, farX });
     assert.ok(layout.active && layout.vertical);
     near(layout.barX - CEILING_ART.BAR / 2, farX, 0, 'inner edge matches physics');
-    near(layout.paneX - layout.paneW / 2, farX, 0, 'glass begins on far wall');
+    near(layout.wallX + layout.wallW / 2, farX + 12, 0, 'outline ends inside the lintel');
     assert.equal(layout.x1, Math.min(FIELD.W, farX + CEILING_ART.BAND));
     assert.equal(layout.y0, 0);
     assert.ok(isCeilingHit(layout, 1));
@@ -31,7 +32,7 @@ test('left far wall: titanium begins on the bounce edge and the pane is beyond i
   }
 });
 
-test('ring and worlds without field limits preserve the original framing and have no ceiling glint', () => {
+test('ring and worlds without field limits preserve the original framing and have no lintel contact light', () => {
   for (const [mode, field] of [['ring', { ceilingY: 420, farX: 450 }], ['bottom', undefined], ['left', undefined]]) {
     const f = ceilingLayout(mode, field);
     assert.equal(f.active, false);
@@ -44,10 +45,99 @@ test('ring and worlds without field limits preserve the original framing and hav
   }
 });
 
+test('segmented lintel has a continuous collision rail, bounded joints and fixed one-draw capacity', () => {
+  for (const mode of ['bottom', 'left']) {
+    const layout = ceilingLayout(mode, { ceilingY: 450, farX: 570 });
+    const rail = lintelPiece(layout, 0);
+    near(rail.y - rail.h / 2, -CEILING_ART.BAR / 2, 0, 'rail is exactly on the inner edge');
+    assert.equal(rail.w, layout.barLength);
+    assert.ok(layout.segments + 1 <= 9);
+    let previousRight = -layout.barLength / 2 - CEILING_ART.JOINT / 2;
+    for (let i = 1; i <= layout.segments; i++) {
+      const part = lintelPiece(layout, i);
+      near(part.x - part.w / 2 - previousRight, CEILING_ART.JOINT, 1e-9);
+      near(part.y - part.h / 2, rail.y + rail.h / 2, 0, 'cap sits against the rail');
+      near(part.y + part.h / 2, CEILING_ART.BAR / 2, 0);
+      previousRight = part.x + part.w / 2;
+    }
+    near(previousRight, layout.barLength / 2 - CEILING_ART.JOINT / 2, 1e-9);
+  }
+});
+
+test('warm contact expands briefly, stays inside the lintel and expires without a hot residual', () => {
+  const out = {};
+  for (const mode of ['bottom', 'left', 'ring']) {
+    const layout = ceilingLayout(mode, { ceilingY: 450, farX: 570 });
+    const extent = mode === 'left' ? FIELD.H : FIELD.W;
+    for (const at of [-100, 0, extent / 2, extent, extent + 100]) {
+      let alpha = 1;
+      for (const age of [0, .25, .5, .99, 1, 5]) {
+        assert.equal(ceilingContact(layout, at, age, out), out, 'reuses the supplied object');
+        assert.ok(out.at - out.length / 2 >= -extent / 2 - 1e-9);
+        assert.ok(out.at + out.length / 2 <= extent / 2 + 1e-9);
+        assert.ok(out.alpha <= alpha);
+        if (mode === 'ring' || age >= 1) assert.equal(out.alpha, 0);
+        alpha = out.alpha;
+      }
+    }
+  }
+});
+
+const STUB_URL = new URL('./fixtures/C/kiln-three-stub.mjs', import.meta.url).href;
+register(`data:text/javascript,${encodeURIComponent(`export async function resolve(spec, ctx, next) {
+  if (spec === 'three' || spec === 'three/addons/geometries/RoundedBoxGeometry.js') return { url: ${JSON.stringify(STUB_URL)}, shortCircuit: true };
+  return next(spec, ctx);
+}`)}`);
+const THREE = await import(STUB_URL);
+const { createKiln } = await import('../src/render/kiln.js');
+
+test('real kiln mode changes reuse the lintel, clip the outline and clear contact state before ring play', () => {
+  const scene = new THREE.Group(), plain = {};
+  const kiln = createKiln(scene, { wallGlass: plain, titaniumP: plain, ribs: plain, pillars: plain, grate: {}, tex: { glow: {} } });
+  const pool = kiln.ceilingBar, glow = kiln.ceilingGlow, geometry = pool.geometry, material = pool.material;
+  const walls = kiln.frame.children.slice(0, 4);
+  const sill = scene.children.find((mesh) => mesh !== pool && mesh.material?.metalness === .7);
+  assert.ok(sill, 'existing forged sill remains');
+  assert.notEqual(material, sill.material, 'plain and instanced meshes keep separate program state');
+  for (const key of ['color', 'roughness', 'metalness', 'envMapIntensity']) {
+    assert.equal(material[key], sill.material[key], 'lintel retains the sill finish');
+  }
+  for (const mode of ['bottom', 'left', 'bottom', 'ring', 'left', 'ring']) {
+    kiln.setMode(mode, { ceilingY: 450, farX: 570 });
+    assert.equal(kiln.ceilingBar, pool); assert.equal(pool.geometry, geometry); assert.equal(pool.material, material);
+    assert.equal(pool.visible, mode !== 'ring'); assert.equal(glow.visible, mode !== 'ring');
+    assert.equal(pool.count > 0, mode !== 'ring', 'renderer draws only nonempty instance pools');
+    const [left, right, top, bottom] = walls;
+    if (mode === 'bottom') {
+      assert.equal(left.scale.y * (FIELD.H + 24), FIELD.H - 450 + 24);
+      assert.equal(left.position.y, FIELD.H / 2 - (450 + FIELD.H) / 2);
+      assert.equal(top.visible, false); assert.equal(right.visible, true);
+    } else if (mode === 'left') {
+      assert.equal(top.scale.x * (FIELD.W + 24), 570 + 24);
+      assert.equal(top.position.x, 570 / 2 - FIELD.W / 2);
+      assert.equal(right.visible, false); assert.equal(left.visible, false);
+    } else {
+      for (const wall of walls) { assert.equal(wall.scale.x, 1); assert.equal(wall.scale.y, 1); assert.equal(wall.visible, true); }
+      assert.equal(left.position.y, 0); assert.equal(top.position.x, 0);
+      assert.equal(kiln.wallHit(2, 360, 450, 1), false);
+    }
+    assert.equal(glow.material.uniforms.uHit.value.z, 0, 'mode change clears old contact');
+    const wall = mode === 'left' ? 1 : 2;
+    if (mode !== 'ring') {
+      assert.equal(kiln.wallHit(wall, 360, 450, 1), true);
+      assert.equal(glow.material.uniforms.uHit.value.z, .8);
+      kiln.update(1 + CEILING_ART.HIT_S + .01, 0, 1, 0);
+      assert.equal(glow.material.uniforms.uHit.value.z, 0, 'contact expires on the actual renderer');
+    }
+  }
+  assert.ok(!('ceilingPane' in kiln), 'no full-band pane remains');
+  assert.equal(scene.children.filter(v => v.material === material).length, 0, 'no plain mesh shares the instanced material');
+});
+
 test('reframed arena fits desktop and phone, reserves and mouth stay clear, original input coordinates round-trip', () => {
   for (const mode of ['bottom', 'left']) {
     const frame = ceilingLayout(mode, { ceilingY: 450, farX: 450 });
-    for (const [W, H, top, bottom] of [[1440, 900, 0, 0], [390, 844, 100, 70], [768, 1024, 150, 70], [800, 557, 100, 0]]) {
+    for (const [W, H, top, bottom] of [[1440, 900, 0, 0], [390, 844, 100, 70], [320, 568, 100, 70], [768, 1024, 150, 70], [800, 557, 100, 0]]) {
       const pose = createPose();
       const out = fitCamera(W, H, pose, {}, { top, bottom, frame });
       const b = fieldBounds(pose, W, H, {}, frame);

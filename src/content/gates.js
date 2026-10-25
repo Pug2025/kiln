@@ -15,14 +15,14 @@
 
 import { LEGEND } from '../levels/legend.js';
 
-/** @typedef {{id:string, label:string, fact:string}} Twist */
+/** @typedef {{id:string, label:string, fact:string, counts:Record<string,number>}} Twist */
 
 const PLAIN = 'abc';
 const LANE_OK = new Set(['.', ' ', 'a', 'b', 'c', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'E', '?']);
 
 /**
- * Every twist part: a cost or a payoff. `label` names it on the door ("Armour + more drops"); the
- * door's fact line counts what it does to the wall (door()).
+ * Every twist part: a cost or a payoff. These labels identify the parts; door() describes the
+ * whole trade for the player.
  */
 export const TWISTS = Object.freeze({
   moving: { kind: 'cost', label: 'Moving rows' },     // the first and last row that can slide
@@ -126,24 +126,26 @@ function added(def, out, ch) {
 }
 
 /**
- * The door a cost and a payoff make: {id, label, fact}. The fact counts what the door does to
- * this wall ("12 bricks armoured, 7 explode"), so it is always true and needs no reading of odds.
+ * One cost-first trade on the card. Counts stay available to tools and tests, outside the
+ * display strings. An empty fact keeps the generic pick screen from repeating the trade.
  */
 export function door(def, cost, pay) {
   const id = `${cost}+${pay}`;
-  const c = TWISTS[cost], p = TWISTS[pay];
   const out = applyTwistDef(def, id);
   const a = added(def, out, 'A'), e = added(def, out, 'E'), r = added(def, out, '?');
   const h = def.rows.reduce((n, line, row) => n + [...line].filter((ch, col) =>
     LEGEND[out.rows[row][col]].hp === LEGEND[ch].hp + 1).length, 0);
-  const what = {
-    moving: mode(def) === 'left' ? '2 columns slide' : '2 rows slide',
-    armoured: a === 1 ? '1 brick armoured' : `${a} bricks armoured`,
-    heavier: `${h} take 1 more hit`,
-    explosive: e === 1 ? '1 explodes' : `${e} explode`,
-    rich: r === 1 ? '1 carries a drop' : `${r} carry a drop`,
+  const counts = {
+    [cost]: cost === 'moving' ? (out.motion || []).length - (def.motion || []).length : cost === 'armoured' ? a : h,
+    [pay]: pay === 'explosive' ? e : r,
   };
-  return { id, label: `${c.label} + ${p.label}`, fact: `${what[cost]}, ${what[pay]}` };
+  const wall = {
+    moving: mode(def) === 'left' ? 'Columns slide' : 'Rows slide',
+    armoured: 'Armoured wall',
+    heavier: 'Bricks take an extra hit',
+  };
+  const reward = pay === 'rich' ? 'with more powers inside.' : cost === 'heavier' ? 'but some explode.' : 'but some bricks explode.';
+  return { id, label: `${wall[cost]}, ${reward}`, fact: '', counts };
 }
 
 /** The pair the rule picks for a level without `doors`: two costs, one payoff each, by level number. */
