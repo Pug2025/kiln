@@ -115,9 +115,10 @@ const QA_SRC = `(() => {
       }
       return -1;
     },
+    freeBall(b) { return b.alive && !b.held && b.sealed < 0; },
     inFlight() {
       const w = window.__kiln.world;
-      return w.phase === 'play' && w.balls.some((b) => b.alive && !b.held && b.sealed < 0);
+      return w.phase === 'play' && w.balls.some(L.freeBall);
     },
   };
   window.requestAnimationFrame = (cb) => raf((t) => { if (L.hold) held.push(cb); else cb(t); });
@@ -206,7 +207,7 @@ const GEOM_SRC = `(async () => {
 const DROP_SRC = `(async () => {
   const k = window.__kiln, w = k.world, p = w.paddle;
   const { FIELD, RING } = await import(new URL('src/core/constants.js', document.baseURI).href);
-  const b = w.balls.find((q) => q.alive && !q.held && q.sealed < 0);
+  const b = w.balls.find(window.__kilnLeg.freeBall);
   if (!b) return false;
   let x, y, vx = 0, vy = 0;
   if (w.level.mode === 'left') {
@@ -226,6 +227,32 @@ const DROP_SRC = `(async () => {
   b.x = b.px = x; b.y = b.py = y; b.vx = vx; b.vy = vy;
   return true;
 })()`;
+
+// Snapshot the same eligibility rule the forced loss uses. This is QA-only diagnostic state;
+// it never changes a held ball, phase, physics or the renderer to make a fixture pass.
+const FLARE_STATE_SRC = `(() => {
+  const k = window.__kiln, w = k.world;
+  return {
+    phase: w.phase, step: w.step, time: w.time, mode: w.level.mode,
+    appMode: k.app?.mode, paused: !!k.app?.paused,
+    lives: w.run?.lives, combo: w.econ.combo, mult: w.econ.mult,
+    ballsLost: w.stats.ballsLost, remaining: w.level.remaining,
+    catchOn: w.effects.catchOn, catchMs: w.effects.catchMs,
+    freeCount: w.balls.filter(window.__kilnLeg.freeBall).length,
+    balls: w.balls.map((b, i) => ({ i, alive: !!b.alive, held: !!b.held, sealed: b.sealed,
+      x: b.x, y: b.y, vx: b.vx, vy: b.vy })),
+  };
+})()`;
+
+async function ensureFlareBall(ev) {
+  const before = await ev(FLARE_STATE_SRC);
+  if (before.freeCount > 0) return { ok: true, frames: 0, before, after: before };
+  // The earlier inFlight check precedes 45 easing frames. A legitimate catch or loss can occur
+  // in that gap. Let the existing robot/launcher regain flight, without inventing a free ball.
+  const frames = await ev('window.__kilnLeg.step(900, window.__kilnLeg.inFlight)');
+  const after = await ev(FLARE_STATE_SRC);
+  return { ok: frames >= 0 && after.phase === 'play' && after.freeCount > 0, frames, before, after };
+}
 
 const BOOTED = 'window.__kiln && window.__kiln.world && window.__kiln.world.step > 0';
 
@@ -286,6 +313,7 @@ async function measureLevel(page, o, levelN, prefix, log) {
     }
     await ev('window.__kilnLeg.step(45)'); // the fire eases to the new multiplier over 0.6 s
     const caps = [];
+    let flareSetup = null;
     if (!s.flare) {
       const omega = await ev('window.__kiln.renderer._internals.fire.st.omega');
       const third = Math.max(1, Math.round((60 * 2 * Math.PI) / (omega || 1.25) / 3));
@@ -296,14 +324,19 @@ async function measureLevel(page, o, levelN, prefix, log) {
       await ev(`window.__kilnLeg.step(${third})`);
       caps.push(await capture(page, o, `${prefix}-L${levelN}-${s.id}-c`, false));
     } else {
+      flareSetup = await ensureFlareBall(ev);
+      if (!flareSetup.ok) {
+        out.push({ state: s.id, skipped: 'no free ball to drop after bounded reacquisition', diagnostics: flareSetup });
+        continue;
+      }
       const lost0 = await ev('window.__kiln.world.stats.ballsLost');
       if (!(await ev(DROP_SRC))) {
-        out.push({ state: s.id, skipped: 'no free ball to drop' });
+        out.push({ state: s.id, skipped: 'no free ball to drop', diagnostics: { setup: flareSetup, atFailure: await ev(FLARE_STATE_SRC) } });
         continue;
       }
       const n = await ev(`window.__kilnLeg.step(30, () => window.__kiln.world.stats.ballsLost > ${lost0})`);
       if (n < 0) {
-        out.push({ state: s.id, skipped: 'the dropped ball was not lost' });
+        out.push({ state: s.id, skipped: 'the dropped ball was not lost', diagnostics: { setup: flareSetup, atFailure: await ev(FLARE_STATE_SRC) } });
         continue;
       }
       await ev('window.__kilnLeg.step(3)');
@@ -313,7 +346,7 @@ async function measureLevel(page, o, levelN, prefix, log) {
     }
     const worst = (k) => caps.filter((c) => c[k]).reduce((m, c) => (!m || c[k].ratio < m[k].ratio ? c : m), null);
     const wp = worst('paddle'), wb = worst('ball');
-    out.push({ state: s.id, caps, paddle: wp && wp.paddle, paddleAt: wp && wp.tag, ball: wb && wb.ball, ballAt: wb && wb.tag });
+    out.push({ state: s.id, caps, paddle: wp && wp.paddle, paddleAt: wp && wp.tag, ball: wb && wb.ball, ballAt: wb && wb.tag, ...(flareSetup?.frames ? { flareSetup } : {}) });
     log(`    ${s.id.padEnd(9)} paddle ${fmt(wp && wp.paddle).padEnd(22)} ball ${fmt(wb && wb.ball).padEnd(22)} fire ${caps.map((c) => c.fire).join(' / ')}${s.flare ? ` (flare ${caps.map((c) => c.flare).join(' / ')})` : ''}`);
   }
   await ev('window.__kilnLeg.release()');

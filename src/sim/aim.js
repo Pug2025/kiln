@@ -63,6 +63,57 @@ export function inherit(c, out) {
 const MOTION_CAP = 128;
 /** Segment length near moving boss parts (about 0.1 s of flight). */
 const MOTION_SEG = 60;
+// Many candidate shots ask for the same future times. Two ways per set keep both endpoints
+// alive even when their hashes collide; all storage is retained for this robot's lifetime.
+const MOTION_CACHE_SETS = 64;
+const MOTION_CACHE_SLOTS = MOTION_CACHE_SETS * 2;
+const MOTION_CACHE_STRIDE = MOTION_CAP * 2;
+
+function createMotionCache() {
+  const times = new Float64Array(MOTION_CACHE_SLOTS), input = new Float64Array(1);
+  return {
+    epoch: 1,
+    times,
+    keys: new Uint32Array(times.buffer),
+    input,
+    inputKey: new Uint32Array(input.buffer),
+    stamps: new Uint32Array(MOTION_CACHE_SLOTS),
+    next: new Uint8Array(MOTION_CACHE_SETS),
+    positions: new Float64Array(MOTION_CACHE_SLOTS * MOTION_CACHE_STRIDE),
+  };
+}
+
+/** Cache the time in retained scratch; only object/integer arguments cross this hot call. */
+function motionAt(m, keep) {
+  const cache = m.cache, lo = cache.inputKey[0], hi = cache.inputKey[1];
+  let hash = lo ^ hi;
+  hash = Math.imul(hash ^ (hash >>> 16), 0x7feb352d);
+  hash = Math.imul(hash ^ (hash >>> 15), 0x846ca68b);
+  const bucket = (hash ^ (hash >>> 16)) & (MOTION_CACHE_SETS - 1), first = bucket * 2;
+  const epoch = cache.epoch;
+  for (let way = 0; way < 2; way++) {
+    const slot = first + way;
+    if (cache.stamps[slot] === epoch && cache.keys[slot * 2] === lo && cache.keys[slot * 2 + 1] === hi) {
+      cache.next[bucket] = 1 - way;
+      return slot;
+    }
+  }
+  let slot = cache.stamps[first] !== epoch ? first
+    : cache.stamps[first + 1] !== epoch ? first + 1 : first + cache.next[bucket];
+  if (slot === keep) slot = first + (slot === first ? 1 : 0);
+  cache.next[bucket] = slot === first ? 1 : 0;
+  const time = cache.input[0], start = slot * MOTION_CACHE_STRIDE;
+  const cx = m.cx + m.vx * time, cy = m.cy + m.vy * time;
+  for (let k = 0; k < m.n; k++) {
+    const rx = m.rx[k], ry = m.ry[k], w = m.w[k];
+    const ca = Math.cos(w * time), sa = Math.sin(w * time);
+    cache.positions[start + k * 2] = cx + rx * ca - ry * sa;
+    cache.positions[start + k * 2 + 1] = cy + rx * sa + ry * ca;
+  }
+  cache.times[slot] = time;
+  cache.stamps[slot] = epoch;
+  return slot;
+}
 
 /**
  * Moving boss parts as the cast sees them: each turns about the boss centre at its own rate
@@ -79,18 +130,24 @@ export function createMotion() {
     cx: 0.5, cy: 0.5,                   // boss centre now
     vx: 0.5, vy: 0.5,                   // its velocity
     R: 0.5,                             // reach of every part from the centre (bounding circle)
+    innerR: 0.5,                        // clear hole before angular chord motion and ball radius
+    orbitR: 0.5, maxOmega: 0.5,          // conservative chord-travel bound
+    cache: createMotionCache(),
   };
 }
 
 /** Read the moving boss parts from this step's world (their motion over the last step). */
 export function updateMotion(m, world, grid) {
+  const cache = m.cache;
+  cache.epoch = (cache.epoch + 1) >>> 0;
+  if (cache.epoch === 0) { cache.stamps.fill(0); cache.epoch = 1; }
   m.n = 0;
   const boss = world.boss;
   if (!grid.moving || !boss || !boss.active) return;
   const B = world.bricks, dt = SIM.DT;
   const cx = boss.x, cy = boss.y;
   const vbx = (boss.x - boss.px) / dt, vby = (boss.y - boss.py) / dt;
-  let R = 0;
+  let R = 0, innerR = Infinity, orbitR = 0, maxOmega = 0;
   for (let k = 0; k < grid.liveCount && m.n < MOTION_CAP; k++) {
     const i = grid.live[k];
     const f = B.flags[i];
@@ -103,14 +160,21 @@ export function updateMotion(m, world, grid) {
     m.rx[j] = rx;
     m.ry[j] = ry;
     m.w[j] = r2 > 1 ? (rx * vy - ry * vx) / r2 : 0;
-    const reach = Math.sqrt(r2) + Math.sqrt(B.w[i] * B.w[i] + B.h[i] * B.h[i]) / 2;
+    const radius = Math.sqrt(r2), halfDiagonal = Math.sqrt(B.w[i] * B.w[i] + B.h[i] * B.h[i]) / 2;
+    const reach = radius + halfDiagonal;
     if (reach > R) R = reach;
+    if (radius - halfDiagonal < innerR) innerR = radius - halfDiagonal;
+    if (radius > orbitR) orbitR = radius;
+    if (Math.abs(m.w[j]) > maxOmega) maxOmega = Math.abs(m.w[j]);
   }
   m.cx = cx;
   m.cy = cy;
   m.vx = vbx;
   m.vy = vby;
   m.R = R;
+  m.innerR = Math.max(0, innerR);
+  m.orbitR = orbitR;
+  m.maxOmega = maxOmega;
 }
 
 /**
@@ -205,16 +269,40 @@ export function castPath(c, world, grid, mc, x, y, dx, dy, r, maxBounces, maxLen
       const tA = c.t0 + len / speed, tB = tA + seg / speed;
       const cxA = M.cx + M.vx * tA, cyA = M.cy + M.vy * tA;
       const cxB = M.cx + M.vx * tB, cyB = M.cy + M.vy * tB;
-      for (let k = 0; k < M.n; k++) {
-        const i = M.idx[k];
-        if (i === skip || !B.alive[i]) continue;
-        const rx = M.rx[k], ry = M.ry[k], w = M.w[k];
-        const ca = Math.cos(w * tA), sa = Math.sin(w * tA), cb = Math.cos(w * tB), sb = Math.sin(w * tB);
-        const xa = cxA + rx * ca - ry * sa, ya = cyA + rx * sa + ry * ca;
-        const xb = cxB + rx * cb - ry * sb, yb = cyB + rx * sb + ry * cb;
-        CQ.px = x - xa; CQ.py = y - ya; CQ.dx = mx - (xb - xa); CQ.dy = my - (yb - ya); CQ.r = r;
-        CQ.cx = 0; CQ.cy = 0; CQ.hw = B.w[i] / 2; CQ.hh = B.h[i] / 2;
-        if (sweepRectCore(c.hit) && CQ.t < best) { best = CQ.t; kind = 2; id = i; nx = c.hit.nx; ny = c.hit.ny; }
+      const px = x - cxA, py = y - cyA, dx = mx - (cxB - cxA), dy = my - (cyB - cyA);
+      const endX = px + dx, endY = py + dy, length2 = dx * dx + dy * dy;
+      const at = length2 > 0 ? Math.max(0, Math.min(1, -(px * dx + py * dy) / length2)) : 0;
+      const nearX = px + dx * at, nearY = py + dy * at;
+      // Moving centres follow chords between their endpoint rotations. The outer circle
+      // contains every chord; the inner hole loses at most radius * angular travel (or 2r).
+      // Pad negative-time contacts as well as ordinary grid-style grazing/roundoff slack.
+      const pad = 2 + (Math.abs(dx) + Math.abs(dy) + 2 * M.orbitR) * 1e-7;
+      const outer = M.R + r + pad;
+      const turn = M.maxOmega * (Math.abs(tB - tA) + 8 * Number.EPSILON * (Math.abs(tA) + Math.abs(tB) + 1));
+      const inner = M.innerR - M.orbitR * Math.min(2, turn) - r - pad;
+      const outside = nearX * nearX + nearY * nearY > outer * outer;
+      const inside = inner > 0 && Math.max(px * px + py * py, endX * endX + endY * endY) < inner * inner;
+      if (!outside && !inside) {
+        const cache = M.cache;
+        cache.input[0] = tA;
+        const atA = motionAt(M, -1);
+        cache.input[0] = tB;
+        const atB = motionAt(M, atA);
+        const startA = atA * MOTION_CACHE_STRIDE, startB = atB * MOTION_CACHE_STRIDE;
+        for (let k = 0; k < M.n; k++) {
+          const i = M.idx[k];
+          if (i === skip || !B.alive[i]) continue;
+          const xa = cache.positions[startA + k * 2], ya = cache.positions[startA + k * 2 + 1];
+          const xb = cache.positions[startB + k * 2], yb = cache.positions[startB + k * 2 + 1];
+          const qx = x - xa, qy = y - ya, qdx = mx - (xb - xa), qdy = my - (yb - ya);
+          const hw = B.w[i] / 2, hh = B.h[i] / 2;
+          const padX = 2 + Math.abs(qdx) * 1e-7, padY = 2 + Math.abs(qdy) * 1e-7;
+          if (Math.max(qx, qx + qdx) < -hw - r - padX || Math.min(qx, qx + qdx) > hw + r + padX ||
+              Math.max(qy, qy + qdy) < -hh - r - padY || Math.min(qy, qy + qdy) > hh + r + padY) continue;
+          CQ.px = qx; CQ.py = qy; CQ.dx = qdx; CQ.dy = qdy; CQ.r = r;
+          CQ.cx = 0; CQ.cy = 0; CQ.hw = hw; CQ.hh = hh;
+          if (sweepRectCore(c.hit) && CQ.t < best) { best = CQ.t; kind = 2; id = i; nx = c.hit.nx; ny = c.hit.ny; }
+        }
       }
     }
     for (let k = 0; k < S.length; k++) {

@@ -40,14 +40,20 @@ export const FIRE_FRAG = withOutput(`
   precision highp float; varying vec2 vUv; varying vec3 vW;
   uniform float uTime, uIntensity, uAspect, uSoft, uFootY, uTip, uFlow, uHot; uniform int uOctaves; uniform vec3 uHeatLo, uHeatHi;
   uniform float uClipY, uFlareClipY, uPadR, uBand; uniform vec2 uPadA, uPadB;
+  uniform vec2 uScreenA, uScreenB; uniform float uScreenR, uScreenF, uScreenStrength;
   ${NOISE}
+  float screenBand(){
+    vec2 pa = gl_FragCoord.xy - uScreenA, ba = uScreenB - uScreenA;
+    float k = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-4), 0.0, 1.0);
+    return 1.0 - smoothstep(uScreenR, uScreenR + uScreenF, length(pa - ba * k));
+  }
   float legible(out float dim){
     vec2 pa = vW.xy - uPadA, ba = uPadB - uPadA;
     float k = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-4), 0.0, 1.0);
     float dPad = length(pa - ba * k) - uPadR;
     float nearPad = 1.0 - smoothstep(40.0, 60.0, dPad);
     float clipY = mix(uFlareClipY, uClipY, nearPad);
-    dim = 1.0 - uBand * nearPad;
+    dim = 1.0 - max(uBand * nearPad, uScreenStrength * screenBand());
     return 1.0 - smoothstep(clipY - 14.0, clipY, vW.y);
   }
   void main(){

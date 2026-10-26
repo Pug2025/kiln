@@ -1,7 +1,7 @@
 import { test, assert, near } from './lib.mjs';
 import * as THREE from '../vendor/three/0.160.0/build/three.module.js';
-import { BALL, FIELD } from '../src/core/constants.js';
-import { BALL_BLOOM, writeBallBloom } from '../src/render/ball-bloom.js';
+import { BALL, FIELD, PADDLE, RING } from '../src/core/constants.js';
+import { BALL_BLOOM, writeBallBloom, paddleBloomRadius } from '../src/render/ball-bloom.js';
 
 const ball = (x = 360, y = 450) => ({ alive: true, held: false, sealed: -1, r: BALL.R, x, y, px: x - 20, py: y + 30 });
 const world = (balls = [ball()]) => ({ boss: { active: true, id: 'core', phase: 1 }, balls });
@@ -27,9 +27,10 @@ test('bloom circles follow the drawn interpolated centre through real perspectiv
       assert.equal(writeBallBloom(out, world([b]), alpha, m, W, H), 1);
       const x = b.px + (b.x - b.px) * alpha, y = b.py + (b.y - b.py) * alpha;
       const c = projected(cam, x, y, W, H), ex = projected(cam, x + b.r, y, W, H), ey = projected(cam, x, y + b.r, W, H);
-      const r = Math.min(Math.hypot(ex[0] - c[0], ex[1] - c[1]), Math.hypot(ey[0] - c[0], ey[1] - c[1]));
+      const r = Math.max(Math.hypot(ex[0] - c[0], ex[1] - c[1]), Math.hypot(ey[0] - c[0], ey[1] - c[1]));
       near(out[0], c[0], .00025); near(out[1], c[1], .00025);
-      near(out[2], r * BALL_BLOOM.INNER, .0001); near(out[3], r * BALL_BLOOM.FEATHER, .0001);
+      near(out[2], r * BALL_BLOOM.INNER + BALL_BLOOM.FILTER_PAD, .0001);
+      near(out[3], Math.max(1, r * BALL_BLOOM.FEATHER), .0001);
     }
   }
 });
@@ -43,7 +44,61 @@ test('held balls use their actual latest position and enlarged balls scale the s
   near(out[0], p[0], .0001); near(out[1], p[1], .0001);
   b.r *= 2;
   writeBallBloom(out, w, .75, clip(cam), 780, 1688);
-  assert.ok(out[2] > small * 1.99 && out[2] < small * 2.01);
+  assert.ok(out[2] - BALL_BLOOM.FILTER_PAD > (small - BALL_BLOOM.FILTER_PAD) * 1.99);
+  assert.ok(out[2] - BALL_BLOOM.FILTER_PAD < (small - BALL_BLOOM.FILTER_PAD) * 2.01);
+});
+
+test('tight ball guards contain the complete projected sphere and thin rim, including off-axis perspective', () => {
+  for (const [W, H] of [[640, 1136], [780, 1688], [2560, 1600]]) for (const lean of [-1, 0, 1]) {
+    const cam = camera(W, H, lean), m = clip(cam), out = new Float32Array(4);
+    for (const [x, y] of [[45, 130], [360, 540], [680, 1000]]) for (const r of [BALL.R, BALL.R * 2]) {
+      const b = { ...ball(x, y), held: true, r };
+      writeBallBloom(out, world([b]), .5, m, W, H);
+      for (let lat = 0; lat <= 16; lat++) for (let lon = 0; lon < 32; lon++) {
+        const a = lat * Math.PI / 16, t = lon * Math.PI / 16;
+        const rimR = r * 1.5;
+        const point = new THREE.Vector3(x - FIELD.W / 2 + rimR * Math.sin(a) * Math.cos(t),
+          FIELD.H / 2 - y + rimR * Math.cos(a), rimR * Math.sin(a) * Math.sin(t)).project(cam);
+        const distance = Math.hypot((point.x + 1) * W / 2 - out[0], (point.y + 1) * H / 2 - out[1]);
+        assert.ok(distance < out[2], 'sphere and maximum thin rim remain inside zero bloom');
+      }
+      assert.ok(out[3] < out[2], 'feather stays local instead of creating the old broad suppression valley');
+    }
+  }
+});
+
+test('projected paddle bounds cover actual bar and bent arc vertices through cosmetic lean and depth', () => {
+  for (const [W, H] of [[640, 1136], [780, 1688], [2560, 1600]]) for (const lean of [-1, 0, 1]) {
+    const cam = camera(W, H, lean), m = clip(cam);
+    for (const mode of ['bottom', 'left', 'ring']) for (const width of [80, 120, 180, 210]) {
+      for (const angle of mode === 'ring' ? [0, Math.PI / 3, Math.PI / 2, Math.PI, Math.PI * 1.5] : [0]) {
+        const p = { x: mode === 'ring' ? RING.CX + Math.cos(angle) * RING.R_PADDLE : mode === 'left' ? 40 : 360,
+          y: mode === 'ring' ? RING.CY + Math.sin(angle) * RING.R_PADDLE : mode === 'left' ? 540 : 1000,
+          h: PADDLE.H, w: width, angle, span: width / 120 * RING.SPAN_DEG * Math.PI / 180 };
+        const rotation = (mode === 'left' ? -Math.PI / 2 : mode === 'ring' ? Math.PI / 2 - angle : 0) + lean * .04;
+        const span = p.span, half = width / 2;
+        const a = mode === 'ring' ? projected(cam, RING.CX + Math.cos(p.angle - span / 2) * RING.R_PADDLE,
+          RING.CY + Math.sin(p.angle - span / 2) * RING.R_PADDLE, W, H)
+          : projected(cam, p.x - (mode === 'left' ? 0 : half), p.y - (mode === 'left' ? half : 0), W, H);
+        const b = mode === 'ring' ? projected(cam, RING.CX + Math.cos(p.angle + span / 2) * RING.R_PADDLE,
+          RING.CY + Math.sin(p.angle + span / 2) * RING.R_PADDLE, W, H)
+          : projected(cam, p.x + (mode === 'left' ? 0 : half), p.y + (mode === 'left' ? half : 0), W, H);
+        const radius = paddleBloomRadius(p, mode, rotation, m, W, H, ...a, ...b);
+        const dx = b[0] - a[0], dy = b[1] - a[1], length2 = dx * dx + dy * dy;
+        // Real actor boxes: arc x is a unit parameter bent by the shader; y/z are dimensions.
+        for (let i = 0; i <= 64; i++) for (const y of [-PADDLE.H / 2, PADDLE.H / 2 + 1.9]) for (const z of [-11, 11.5]) {
+          let x = (i / 64 - .5) * width, yy = y;
+          if (mode === 'ring') { const th = (i / 64 - .5) * span; x = (RING.R_PADDLE - y) * Math.sin(th); yy = RING.R_PADDLE - (RING.R_PADDLE - y) * Math.cos(th); }
+          const v = new THREE.Vector3(p.x - FIELD.W / 2 + x * Math.cos(rotation) - yy * Math.sin(rotation),
+            FIELD.H / 2 - p.y + x * Math.sin(rotation) + yy * Math.cos(rotation), z).project(cam);
+          const px = (v.x + 1) * W / 2, py = (v.y + 1) * H / 2;
+          const k = Math.max(0, Math.min(1, ((px - a[0]) * dx + (py - a[1]) * dy) / length2));
+          assert.ok(Math.hypot(px - a[0] - k * dx, py - a[1] - k * dy) < radius - 1,
+            `${mode}: native mesh point lies within the zero-bloom capsule`);
+        }
+      }
+    }
+  }
 });
 
 test('all twelve visible ball slots compact safely and stale masks clear on death, sealing and reuse', () => {

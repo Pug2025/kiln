@@ -380,6 +380,7 @@ export async function createRenderer(host, opts = {}) {
       gl.setRenderTarget(post.composer.renderTarget1);
       gl.compile(scene, camera);
       gl.setRenderTarget(null);
+      actors.warmPrograms(gl);
     } catch (e) {
       console.warn('[kiln] shader warm-up', e);
     }
@@ -417,7 +418,6 @@ export async function createRenderer(host, opts = {}) {
 
   /** ART 12b: protect the paddle and gameplay balls after the camera moved this frame. */
   function bloomMask(w, alpha) {
-    if (!post.bloomOn) return;
     const bw = width * pr, bh = height * pr;
     projA.copy(padA).project(camera);
     projB.copy(padB).project(camera);
@@ -425,10 +425,13 @@ export async function createRenderer(host, opts = {}) {
     const bx = (projB.x + 1) * 0.5 * bw, by = (projB.y + 1) * 0.5 * bh;
     const len = Math.hypot(padB.x - padA.x, padB.y - padA.y);
     const pxPerUnit = len > 1 ? Math.hypot(bx - ax, by - ay) / len : rig.fit.rect.scale * pr;
-    // a long feather (80 units): with the fire right under the lip a short one cut a dark pill out
-    // of the fire's glow round the paddle
-    post.setBloomMask(ax, ay, bx, by, (w.paddle.h / 2 + 34) * pxPerUnit, 80 * pxPerUnit);
-    if (!menuOn) bloomProjection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    bloomProjection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    const radius = post.paddleBloomRadius(w.paddle, w.level.mode, actors.pad.rotation.z,
+      bloomProjection.elements, bw, bh, ax, ay, bx, by);
+    // The same screen capsule protects both fire depths, including the Lite direct path.
+    fire.setScreenLegibility(ax, ay, bx, by, radius + 8 * pxPerUnit, 80 * pxPerUnit, menuOn ? 0 : 0.95);
+    if (!post.bloomOn) return;
+    post.setBloomMask(ax, ay, bx, by, radius, Math.max(2 * pr, 4 * pxPerUnit));
     post.setBallMasks(w, alpha, bloomProjection.elements, bw, bh, !menuOn);
   }
   function leadX(w) {

@@ -250,12 +250,22 @@ const HEAT_GLSL = `
   totalEmissiveRadiance += vec3(1.0, 0.9, 0.72) * smoothstep(0.9, 1.0, h) * whiteCore * 1.25;
   diffuseColor.rgb *= 1.0 - 0.45 * min(h, 1.0);`;
 
-// A negative instanced heat value is a renderer-only rupture marker: -(1 + heat).
-// Keep the sustained/live and uniform boss shader unchanged. A rupture keeps its warm
-// break cue without washing the neighboring ball into broad white bloom.
-const RUPTURE_HEAT_GLSL = HEAT_GLSL
-  .replace('clamp(vHeat, 0.0, 3.0)', 'clamp(vHeat < 0.0 ? -vHeat - 1.0 : vHeat, 0.0, 3.0)')
-  .replace('diffuseColor.rgb *=', 'totalEmissiveRadiance *= vHeat < 0.0 ? 0.01 : 1.0;\n  diffuseColor.rgb *=');
+// Live bricks retain heat colour and contained crack light without white HDR plates. Boss
+// materials keep their existing contained-heart treatment; this is the instanced brick path.
+const BRICK_HEAT_GLSL = `
+  float h = clamp(vHeat < 0.0 ? -vHeat - 1.0 : vHeat, 0.0, 3.0);
+  float lum = dot(texture2D(map, vMapUv).rgb, vec3(0.33));
+  float crack = smoothstep(0.09, 0.30, lum);
+  vec2 cuv = (vMapUv - 0.5) * vec2(1.0, 1.35);
+  float centre = 1.0 - smoothstep(0.12, 0.62, length(cuv));
+  vec3 hot = mix(uHeatLo, uHeatHi, smoothstep(0.55, 1.4, h) * (0.35 + 0.65 * centre));
+  float body = pow(min(h, 1.0), 2.0) * (0.12 + 0.42 * centre);
+  float lines = min(h, 1.2) * 0.45 * crack * (0.5 + 0.5 * centre);
+  float pulse = max(h - 1.0, 0.0) * 0.12 * pow(centre, 4.0);
+  vec3 emission = hot * min(0.72, body + lines + pulse);
+  // Preserve the existing very brief, dim rupture cue. It never becomes a white flash.
+  totalEmissiveRadiance += emission * (vHeat < 0.0 ? 0.01 : 1.0);
+  diffuseColor.rgb *= 1.0 - 0.45 * min(h, 1.0);`;
 
 /**
  * Ceramic core: crackle albedo + normal, heat from the instanced attribute `aHeat` (0 cold, 1
@@ -281,10 +291,10 @@ export function coreMaterial(tex, opts = {}) {
       .replace('#include <begin_vertex>', `#include <begin_vertex>\nvHeat = ${instanced ? 'aHeat' : 'uHeatValue'};`);
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', '#include <common>\nvarying float vHeat; uniform vec3 uHeatLo, uHeatHi;')
-      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\n${instanced ? RUPTURE_HEAT_GLSL : HEAT_GLSL}`);
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\n${instanced ? BRICK_HEAT_GLSL : HEAT_GLSL}`);
   };
   m.userData.u = u;
-  m.customProgramCacheKey = () => (instanced ? 'kiln-core-i' : 'kiln-core-u');
+  m.customProgramCacheKey = () => (instanced ? 'kiln-core-i-calm' : 'kiln-core-u');
   return m;
 }
 

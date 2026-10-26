@@ -5,8 +5,8 @@
 export const LOOK = Object.freeze({
   // tone and bloom (ART 7, 11.2)
   EXPOSURE: 1.1,
-  BLOOM_STRENGTH: 0.55,
-  BLOOM_RADIUS: 0.25,
+  BLOOM_STRENGTH: 0.18,
+  BLOOM_RADIUS: 0.10,
   BLOOM_THRESHOLD: 0.9,
   MAX_DPR: 2,
   MSAA: 4, // composer samples below 1.75x pixel ratio (ART 7)
@@ -60,14 +60,14 @@ export const LOOK = Object.freeze({
   PADDLE_CAP: 6,
   PADDLE_LINE_REST: 0.35,
   PADDLE_LEAN: 0.03,
-  PADDLE_SELF_LIGHT: 0x68717c,
+  PADDLE_SELF_LIGHT: 0x746a5d,
   PERFECT_FLARE_MS: 120,
 
-  // ball (ART 8)
-  BALL_GAIN: 3.0,
-  BALL_HALO: 40,
-  BALL_HALO_ALPHA: 0.4,
-  BALL_LIGHT: 18000,
+  // Item 19: solid warm ball. The retained HALO field is the dark outline diameter.
+  BALL_GAIN: 1.0,
+  BALL_HALO: 20.88,
+  BALL_HALO_ALPHA: 1.0,
+  BALL_LIGHT: 0,
   BALL_LIGHT_DIST: 320,
   TRAIL_POINTS: 120,
 
@@ -116,7 +116,7 @@ export const LOOK = Object.freeze({
 
   // headroom plates (ART 12a, 15.2): scene-linear peak cap (soft knee from 60%), and the body gain
   // behind D's HUD (phone band, gutters), where the emitters go out
-  PLATE_CAP: 0.17,
+  PLATE_CAP: 0.12,
   PLATE_HUD_BODY: 0.4,
 
   // wall firing on level clear (ART 9.4)

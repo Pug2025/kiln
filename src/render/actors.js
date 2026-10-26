@@ -1,4 +1,4 @@
-// Kiln: the ball, the paddle and the pickups (OWNER: C). Balls (core, halo, light), the paddle in
+// Kiln: the ball, the paddle and the pickups (OWNER: C). Balls (solid core and dark rim), the paddle in
 // all three field modes (bar, vertical bar, arc) with heat line, end caps, perfect-hit flare,
 // Catch line and Afterimage ghosts, ember pickups, and drops with their lit glyphs.
 // All pools are instanced and written in place every frame; nothing allocates.
@@ -125,38 +125,72 @@ export function createActors(scene, M) {
 
   // ---------------------------------------------------------------- balls
   const ballGeo = new THREE.SphereGeometry(BALL.R, 28, 20);
-  // The simulated ball stays readable in front of glass and Fog. It is an opaque-looking
-  // emitter in the final transparent pass, so scenery never hides its collision position.
-  const ballMat = new THREE.MeshBasicMaterial({
-    color: new THREE.Color(1, 0.97, 0.92).multiplyScalar(LOOK.BALL_GAIN),
+  // A solid heat-high sphere stays visible through glass and Fog without adding HDR light.
+  // Quiet view-space shading gives it volume while its brightest point stays heat-high.
+  const ballMat = new THREE.ShaderMaterial({
+    uniforms: { uBallColor: { value: PAL.heatHi.clone().multiplyScalar(LOOK.BALL_GAIN) } },
     transparent: true, depthTest: false, depthWrite: false,
+    vertexShader: `varying vec3 vBallNormal;
+      void main(){
+        vBallNormal = normalMatrix * mat3(instanceMatrix) * normal;
+        gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.0);
+      }`,
+    fragmentShader: withOutput(`precision highp float; varying vec3 vBallNormal; uniform vec3 uBallColor;
+      void main(){
+        float light = max(0.0, dot(normalize(vBallNormal), normalize(vec3(-0.35, 0.5, 1.0))));
+        gl_FragColor = vec4(uBallColor * (0.68 + 0.32 * light), 1.0);
+      }`),
   });
   const balls = new THREE.InstancedMesh(ballGeo, ballMat, BALL.MAX);
+  balls.name = 'ball-cores';
   balls.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   balls.frustumCulled = false;
   balls.count = 0;
   balls.renderOrder = 21;
-  const haloMat = new THREE.MeshBasicMaterial({
-    map: M.tex.glow, color: PAL.heatHi.clone(), transparent: true, opacity: LOOK.BALL_HALO_ALPHA,
-    blending: THREE.AdditiveBlending, depthWrite: false,
+  // Reuse the old halo pool for a thin dark silhouette, not a glow texture. Offsets are in
+  // view space, so the disk faces the actual camera even during lean, tilt and roll.
+  const haloMat = new THREE.ShaderMaterial({
+    uniforms: { uOutlineColor: { value: new THREE.Color(0x12100e) }, uOpacity: { value: LOOK.BALL_HALO_ALPHA } },
+    extensions: { derivatives: true },
+    transparent: true, depthTest: false, depthWrite: false,
+    vertexShader: `varying vec2 vOutlineUv;
+      void main(){
+        vOutlineUv = uv;
+        vec4 centre = modelViewMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+        vec2 size = vec2(length(instanceMatrix[0].xyz), length(instanceMatrix[1].xyz));
+        centre.xy += position.xy * size;
+        gl_Position = projectionMatrix * centre;
+      }`,
+    fragmentShader: withOutput(`precision highp float; varying vec2 vOutlineUv; uniform vec3 uOutlineColor; uniform float uOpacity;
+      void main(){
+        float radius = length(vOutlineUv - 0.5) * 2.0;
+        float aa = max(fwidth(radius), 0.001);
+        float alpha = (1.0 - smoothstep(1.0 - aa, 1.0, radius)) * uOpacity;
+        if (alpha <= 0.0) discard;
+        gl_FragColor = vec4(uOutlineColor, alpha);
+      }`),
   });
   const halos = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), haloMat, BALL.MAX);
+  halos.name = 'ball-outlines';
   halos.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   halos.frustumCulled = false;
   halos.count = 0;
-  halos.renderOrder = 8;
+  halos.renderOrder = 20;
   const ballLight = new THREE.PointLight(PAL.heatHi, 0, LOOK.BALL_LIGHT_DIST, 2);
-  root.add(balls, halos, ballLight);
+  root.add(balls, halos);
+  // Keep the diagnostic handle, but do not compile or shade a light configured to emit nothing.
+  if (LOOK.BALL_LIGHT > 0) root.add(ballLight);
 
   // ---------------------------------------------------------------- paddle
   const pad = new THREE.Group();
+  pad.name = 'paddle';
   root.add(pad);
   const bladeGeo = new RoundedBoxGeometry(PADDLE.W, PADDLE.H, LOOK.PADDLE_DEPTH, 3, LOOK.PADDLE_RADIUS);
   const arcGeo = new THREE.BoxGeometry(1, PADDLE.H, LOOK.PADDLE_DEPTH, 64, 1, 1);
   const arcThinGeo = new THREE.BoxGeometry(1, 1, 1, 64, 1, 1);
 
-  const flareProps = () => ({ color: new THREE.Color(1, 0.97, 0.92).multiplyScalar(2.0), transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
-  const catchProps = () => ({ color: PAL.cold.clone().multiplyScalar(1.1), transparent: true, opacity: 0.9, depthWrite: false });
+  const flareProps = () => ({ color: PAL.heatHi.clone(), transparent: true, opacity: 0, depthWrite: false });
+  const catchProps = () => ({ color: PAL.cold.clone().multiplyScalar(0.9), transparent: true, opacity: 0.9, depthWrite: false });
 
   // ART 12b: the paddle is the most legible object at the bottom of the screen. A bevelled
   // brushed-titanium bar with a smoked-glass top and a thin heat-core edge line on its top face
@@ -174,29 +208,32 @@ export function createActors(scene, M) {
     geo.setAttribute('color', new THREE.BufferAttribute(c, 3));
     return geo;
   };
-  // a brighter titanium than the bricks' (more environment, a faint cool self-light) so the paddle
-  // keeps 3:1 against its surroundings even while the fire flares (ART 12b)
+  // Warm brushed titanium with a bounded neutral fill keeps the bevel solid. The fill never
+  // becomes a cool luminous bar; local post protection supplies separation from the fire.
   const padTitanium = M.titanium.clone();
-  padTitanium.envMapIntensity = 3.4;
-  padTitanium.roughness = 0.3;
-  // A cool titanium self-light preserves the brushed surface through Inferno and flares,
-  // without changing any light, fire, exposure or background material.
+  padTitanium.color.set(0xa69a88);
+  padTitanium.envMapIntensity = 1.4;
+  padTitanium.roughness = 0.38;
   padTitanium.emissive = new THREE.Color(LOOK.PADDLE_SELF_LIGHT);
   padTitanium.emissiveIntensity = 1;
 
   // bar (bottom and left modes)
   const blade = new THREE.Mesh(bladeGeo, padTitanium);
+  blade.name = 'paddle-blade';
   const topGlass = new THREE.Mesh(new RoundedBoxGeometry(PADDLE.W - 1, 6, LOOK.PADDLE_DEPTH + 0.8, 2, 2.5), M.paddleGlass);
   topGlass.position.y = H2 - 2.6;
   topGlass.renderOrder = 6;
   const lineMat = new THREE.MeshBasicMaterial({ vertexColors: true, color: 0xffffff });
   const line = new THREE.Mesh(edgeColors(new THREE.BoxGeometry(1, 1.2, 1.4, 24, 1, 1)), lineMat);
+  line.name = 'paddle-heat-line';
   line.position.set(0, H2 + 0.5, D2 - 1.6);
   const flareMat = new THREE.MeshBasicMaterial(flareProps());
   const flare = new THREE.Mesh(new THREE.PlaneGeometry(1, 2.2), flareMat);
+  flare.name = 'paddle-perfect-line';
   flare.renderOrder = 9;
   const catchMat = new THREE.MeshBasicMaterial(catchProps());
   const catchLine = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), catchMat);
+  catchLine.name = 'paddle-catch-line';
   catchLine.renderOrder = 9;
   const bar = new THREE.Group();
   bar.add(blade, topGlass, line, flare, catchLine);
@@ -205,19 +242,24 @@ export function createActors(scene, M) {
   // arc (ring mode): the same parts bent onto the paddle track
   const arcTitanium = bendable(padTitanium.clone(), 'ti');
   const arcBlade = new THREE.Mesh(arcGeo, arcTitanium);
+  arcBlade.name = 'paddle-arc-blade';
   const arcGlass = bendable(glassMaterial({ aMin: 0.3, aMax: 0.9, color: 0x1a1e26, env: 2.6 }), 'glass');
   const arcTop = new THREE.Mesh(new THREE.BoxGeometry(1, 6, LOOK.PADDLE_DEPTH + 0.8, 64, 1, 1), arcGlass);
   arcTop.position.y = H2 - 2.6;
   arcTop.renderOrder = 6;
   const arcLineMat = bendable(new THREE.MeshBasicMaterial({ vertexColors: true, color: 0xffffff }), 'line');
   const arcLine = new THREE.Mesh(edgeColors(new THREE.BoxGeometry(1, 1.2, 1.4, 64, 1, 1)), arcLineMat);
+  arcLine.name = 'paddle-arc-heat-line';
   arcLine.position.set(0, H2 + 0.5, D2 - 1.6);
   const arcFlareMat = bendable(new THREE.MeshBasicMaterial(flareProps()), 'flare');
-  const arcFlare = new THREE.Mesh(arcThinGeo, arcFlareMat);
-  arcFlare.scale.set(1, 2.2, 0.5);
+  // Size the section before bending. Scaling Y afterwards would stretch the arc's entire
+  // sagitta, pulling a Wide paddle's perfect-hit line away from its actual face.
+  const arcFlare = new THREE.Mesh(new THREE.BoxGeometry(1, 2.2, 0.5, 64, 1, 1), arcFlareMat);
+  arcFlare.name = 'paddle-arc-perfect-line';
   arcFlare.renderOrder = 9;
   const arcCatchMat = bendable(new THREE.MeshBasicMaterial(catchProps()), 'catch');
   const arcCatch = new THREE.Mesh(arcThinGeo, arcCatchMat);
+  arcCatch.name = 'paddle-arc-catch-line';
   arcCatch.renderOrder = 9;
   const arc = new THREE.Group();
   arc.add(arcBlade, arcTop, arcLine, arcFlare, arcCatch);
@@ -370,10 +412,9 @@ export function createActors(scene, M) {
     const lean = Math.max(-0.04, Math.min(0.04, -(p.vel / 460) * LOOK.PADDLE_LEAN));
     placeOnTrack(pad, p.x, p.y, lean);
     padState.tick = Math.max(0, padState.tick - dt * 2.5);
-    // edge line: rest 1.0 (just under bloom), rising with every hit, flare and ember catch so its
-    // centre blooms lightly; the fire itself is dimmed around the paddle (fire.js)
-    const heat = 1.0 + fire.st.flare * 0.7 + padState.tick * 1.5;
-    const fl = Math.max(0, 1 - (t - padState.flareT) / (LOOK.PERFECT_FLARE_MS / 1000));
+    // A thin solid edge can warm with a catch or hit, but never adds HDR light.
+    const heat = Math.min(1, 0.8 + fire.st.flare * 0.12 + padState.tick * 0.16);
+    const fl = Math.max(0, Math.min(1, 1 - (t - padState.flareT) / (LOOK.PERFECT_FLARE_MS / 1000)));
     const catchOn = !!world.effects.catchOn;
     const ring = mode === 'ring';
     bar.visible = !ring;
@@ -445,11 +486,6 @@ export function createActors(scene, M) {
   function setBalls(world, alpha, t) {
     let n = 0;
     let lit = -1;
-    const E = world.effects;
-    // halo: Slow / Quench cool it toward cyan (40%), Fire tints it toward heat-low
-    haloMat.color.copy(PAL.heatHi);
-    if (E.ballSpeedScale < 0.999) haloMat.color.lerp(PAL.cold, 0.4);
-    else if (E.fire) haloMat.color.lerp(PAL.heatLo, 0.6);
     for (let i = 0; i < world.balls.length; i++) {
       const b = world.balls[i];
       if (!b.alive) continue;
@@ -461,8 +497,7 @@ export function createActors(scene, M) {
       scl.set(s, s, s);
       m4.compose(pos, qId, scl);
       balls.setMatrixAt(n, m4);
-      const hs = sealed ? 0 : (LOOK.BALL_HALO + 3 * Math.sin(t * 23 + i)) * (b.r / BALL.R);
-      pos.z = 10;
+      const hs = sealed ? 0 : LOOK.BALL_HALO * (b.r / BALL.R);
       scl.set(hs, hs, 1);
       m4.compose(pos, qId, scl);
       halos.setMatrixAt(n, m4);
@@ -562,6 +597,9 @@ export function createActors(scene, M) {
 
     setWorld(world) {
       mode = world.level.mode;
+      balls.count = 0;
+      halos.count = 0;
+      ballLight.intensity = 0;
       padState.flareT = -1e9;
       padState.laserT = -1e9;
       padState.tick = 0;
@@ -592,6 +630,21 @@ export function createActors(scene, M) {
       gl.initTexture(phoneDropAtlas);
       if (dropMatte.map) gl.initTexture(dropMatte.map);
       if (dropMatte.normalMap) gl.initTexture(dropMatte.normalMap);
+    },
+
+    /** Pinned Three compiles empty pools before lazily reflecting their first drawn program. */
+    warmPrograms(gl) {
+      const warmed = new Set();
+      for (const mesh of [...dropMeshes, phoneDropBack]) {
+        const programs = gl.properties.get(mesh.material).programs;
+        if (!programs) continue;
+        for (const program of programs.values()) {
+          if (warmed.has(program)) continue;
+          program.getUniforms();
+          program.getAttributes();
+          warmed.add(program);
+        }
+      }
     },
 
     frame(world, alpha, t, fire, dt) {

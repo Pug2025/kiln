@@ -29,7 +29,7 @@ test('sparks: decorative and hit sparks stay under the bloom threshold, the ball
 });
 
 test('headroom plates: peak at most .6 and a quarter of the ball on screen (ART 15.2)', () => {
-  const ball = aces(LOOK.BALL_GAIN); // the ball's white-hot core
+  const ball = aces(LOOK.BALL_GAIN); // maximum channel of the solid heat-high ball
   const plate = aces(LOOK.PLATE_CAP);
   assert.ok(plate <= 0.6, `plate peak ${plate.toFixed(3)}`);
   assert.ok(plate <= 0.25 * ball, `plate peak ${plate.toFixed(3)} vs ball ${ball.toFixed(3)}`);

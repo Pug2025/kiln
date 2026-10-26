@@ -37,10 +37,16 @@ export function fireMaterial(opts = {}) {
       // legibility (ART 12b), written per frame by setLegibility()
       uClipY: { value: 1e5 },
       uFlareClipY: { value: 1e5 },
-      uPadA: { value: new THREE.Vector2(-1e5, -1e5) },
-      uPadB: { value: new THREE.Vector2(-1e5, -1e5) },
+      uPadA: { value: new Float32Array([-1e5, -1e5]) },
+      uPadB: { value: new Float32Array([-1e5, -1e5]) },
       uPadR: { value: 8 },
       uBand: { value: 0 },
+      // Actual drawing-buffer capsule, shared by the two depths after camera update.
+      uScreenA: { value: new Float32Array(2) },
+      uScreenB: { value: new Float32Array(2) },
+      uScreenR: { value: 0 },
+      uScreenF: { value: 1 },
+      uScreenStrength: { value: 0 },
     },
     vertexShader: FIRE_VERT,
     fragmentShader: FIRE_FRAG,
@@ -162,10 +168,22 @@ export function createFire(scene) {
         const u = mats[k].uniforms;
         u.uClipY.value = lipY;
         u.uFlareClipY.value = lipY + FLARE_CLIMB * Math.min(1, st.climb);
-        u.uPadA.value.set(ax, ay);
-        u.uPadB.value.set(bx, by);
+        u.uPadA.value[0] = ax; u.uPadA.value[1] = ay;
+        u.uPadB.value[0] = bx; u.uPadB.value[1] = by;
         u.uPadR.value = r;
         u.uBand.value = BAND_DIM;
+      }
+    },
+
+    /** Drawing-buffer pixels, bottom-left origin, after the drawn paddle and camera update. */
+    setScreenLegibility(ax, ay, bx, by, radius, feather, strength = 0) {
+      for (let k = 0; k < 2; k++) {
+        const u = mats[k].uniforms;
+        u.uScreenA.value[0] = ax; u.uScreenA.value[1] = ay;
+        u.uScreenB.value[0] = bx; u.uScreenB.value[1] = by;
+        u.uScreenR.value = radius;
+        u.uScreenF.value = feather;
+        u.uScreenStrength.value = strength;
       }
     },
 
@@ -204,6 +222,7 @@ export function createFire(scene) {
     },
 
     reset() {
+      for (let k = 0; k < 2; k++) mats[k].uniforms.uScreenStrength.value = 0;
       st.flare = 0;
       st.climb = 0;
       st.hold = 0;
