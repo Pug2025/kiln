@@ -1,4 +1,4 @@
-// Kiln: the Fire-ball trail (OWNER: C). ART 9.3: while Fire is active each ball trails a flame
+// Kiln: pooled speed streaks and the Fire-ball trail (OWNER: C). ART 9.3: while Fire is active each ball trails a flame
 // ribbon 54 units long (6 radii), width 18 -> 0, intensity following the speed tier; only its root
 // crosses the bloom threshold. CPU ribbon from each ball's recent path, written in place.
 
@@ -13,6 +13,76 @@ const HIST = 24;
 const SEG = 12;
 const LEN = 54;
 const WIDTH = 18;
+
+export const BALL_STREAK = Object.freeze({ LENGTH: 30, SPEED: 0.04, MAX_LENGTH: 64, WIDTH: 6, OPACITY: 0.20, BOOST: 1.15 });
+
+/** The streak ends at the drawn ball's rear edge. Field velocity is inverted with scene Y. */
+export function ballStreakPose(ball, alpha, out) {
+  if (!ball?.alive || ball.held || ball.sealed >= 0 || !Number.isFinite(alpha)) return false;
+  if (!Number.isFinite(ball.px) || !Number.isFinite(ball.py) || !Number.isFinite(ball.x) ||
+      !Number.isFinite(ball.y) || !Number.isFinite(ball.r) || !(ball.r > 0)) return false;
+  const speed = Math.hypot(ball.vx, ball.vy);
+  if (!(speed > 0) || !Number.isFinite(speed)) return false;
+  const x = ball.px + (ball.x - ball.px) * alpha;
+  const y = ball.py + (ball.y - ball.py) * alpha;
+  const length = Math.min(BALL_STREAK.MAX_LENGTH, (BALL_STREAK.LENGTH + BALL_STREAK.SPEED * speed) * (ball.boostMs > 0 ? BALL_STREAK.BOOST : 1));
+  const rear = ball.r + length / 2;
+  out.x = x - HW - ball.vx / speed * rear;
+  out.y = HH - y + ball.vy / speed * rear;
+  out.rotation = Math.atan2(-ball.vy, ball.vx);
+  out.length = length;
+  return true;
+}
+
+/** One modest tapered plane per ordinary moving ball; Fire keeps its separate path ribbon. */
+export function createBallStreaks(scene) {
+  const mat = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, side: THREE.DoubleSide,
+    uniforms: { uHeatLo: { value: PAL_VEC3.heatLo }, uHeatHi: { value: PAL_VEC3.heatHi },
+      uOpacity: { value: BALL_STREAK.OPACITY } },
+    vertexShader: `varying vec2 vUv;
+      void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.0); }`,
+    fragmentShader: withOutput(`precision highp float; varying vec2 vUv;
+      uniform vec3 uHeatLo, uHeatHi; uniform float uOpacity;
+      void main(){
+        float across = abs(vUv.y - 0.5) * 2.0 / max(vUv.x, 0.001);
+        float body = (1.0 - smoothstep(0.1, 1.0, across)) * smoothstep(0.0, 0.2, vUv.x);
+        vec3 col = mix(uHeatLo * 0.45, uHeatHi * 0.65, smoothstep(0.1, 0.95, vUv.x));
+        gl_FragColor = vec4(col, body * uOpacity);
+      }`),
+  });
+  const mesh = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), mat, BALL.MAX);
+  mesh.name = 'ball-speed-streaks';
+  mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  mesh.frustumCulled = false;
+  mesh.renderOrder = 8;
+  mesh.count = 0;
+  scene.add(mesh);
+  const pose = {}, matrix = new THREE.Matrix4(), pos = new THREE.Vector3(), scale = new THREE.Vector3();
+  const rotation = new THREE.Quaternion(), axis = new THREE.Vector3(0, 0, 1);
+  return {
+    reset() { mesh.count = 0; },
+    // A held serve compiles this empty pool without drawing it. Reflect before the first launch.
+    warmPrograms(gl) {
+      const programs = gl.properties.get(mat).programs;
+      if (!programs) return;
+      for (const program of programs.values()) { program.getUniforms(); program.getAttributes(); }
+    },
+    frame(world, alpha) {
+      let n = 0;
+      if (!world.effects.fire) for (let i = 0; i < world.balls.length && n < BALL.MAX; i++) {
+        if (!ballStreakPose(world.balls[i], alpha, pose)) continue;
+        pos.set(pose.x, pose.y, -1);
+        scale.set(pose.length, BALL_STREAK.WIDTH, 1);
+        rotation.setFromAxisAngle(axis, pose.rotation);
+        matrix.compose(pos, rotation, scale);
+        mesh.setMatrixAt(n++, matrix);
+      }
+      mesh.count = n;
+      if (n) mesh.instanceMatrix.needsUpdate = true;
+    },
+  };
+}
 
 export function createTrail(scene) {
   const NB = BALL.MAX;

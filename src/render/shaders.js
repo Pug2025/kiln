@@ -64,7 +64,8 @@ export const FIRE_FRAG = withOutput(`
     // columns: a slow, vertically stretched field decides how tall each tongue is
     float n1 = fbm(vec2(q.x * 1.4 + t * 0.07, q.y * 0.55 - uFlow * 0.9), uOctaves);
     // licks: finer turbulence rising through the tongues
-    float n2 = fbm(vec2(q.x * 3.2 - t * 0.11 + 9.0, q.y * 1.6 - uFlow * 2.4), max(uOctaves - 2, 2));
+    int detailOctaves = uOctaves > 4 ? uOctaves - 2 : 2;
+    float n2 = fbm(vec2(q.x * 3.2 - t * 0.11 + 9.0, q.y * 1.6 - uFlow * 2.4), detailOctaves);
     float col1 = smoothstep(0.3, 0.72, n1);
     float tip = max(uTip * (0.32 + 0.95 * col1), 0.05);
     float f = (0.66 + 0.18 * uHot) * (1.0 - yy / tip) + (n2 - 0.5) * 0.75 + (col1 - 0.5) * 0.12;
@@ -87,10 +88,42 @@ export const FIRE_FRAG = withOutput(`
     gl_FragColor = vec4(col * a * dim * (0.6 + 0.3 * uIntensity) * (1.0 - uSoft * 0.55), a);
   }`);
 
+// Constant per-plane parameters share the same program across the three sorted haze draws.
+export const HAZE_VERT = `
+  attribute vec4 aHaze; varying vec2 vUv;
+  #if __VERSION__ >= 300
+    flat varying vec4 vHaze;
+  #else
+    varying vec4 vHaze;
+  #endif
+  void main(){
+    vUv = uv; vHaze = aHaze;
+    vec4 local = instanceMatrix * vec4(position, 1.0);
+    gl_Position = projectionMatrix * modelViewMatrix * local;
+  }`;
+
 export const HAZE_FRAG = withOutput(`
-  precision highp float; varying vec2 vUv; uniform float uTime, uSeed, uAlpha, uWarm, uTint; uniform vec3 uHeatLo;
+  precision highp float; varying vec2 vUv;
+  #if __VERSION__ >= 300
+    flat varying vec4 vHaze;
+  #else
+    varying vec4 vHaze;
+    uniform vec3 uParams[4];
+  #endif
+  uniform float uTimes[4], uWarm; uniform vec3 uHeatLo;
   ${NOISE}
   void main(){
+    // CPU offsets retain the original float32 values even after long sessions. Constant indices
+    // also work on WebGL 1 implementations that restrict uniform-array indexing.
+    float uTime = vHaze.w < 0.5 ? uTimes[0] : vHaze.w < 1.5 ? uTimes[1] : vHaze.w < 2.5 ? uTimes[2] : uTimes[3];
+    #if __VERSION__ >= 300
+      vec3 params = vHaze.xyz;
+    #else
+      // Smooth interpolation can perturb a noise seed. WebGL 1 selects the same static float32
+      // parameters by layer instead; only the integer layer's threshold travels through a varying.
+      vec3 params = vHaze.w < 0.5 ? uParams[0] : vHaze.w < 1.5 ? uParams[1] : vHaze.w < 2.5 ? uParams[2] : uParams[3];
+    #endif
+    float uSeed = params.x, uAlpha = params.y, uTint = params.z;
     vec2 p = vUv * vec2(3.0, 2.2) + uSeed;
     float n = fbm(vec2(p.x + uTime * 0.015, p.y - uTime * 0.05), 4);
     float n2 = fbm(vec2(p.x * 2.1 - uTime * 0.01 + 4.0, p.y * 2.0 - uTime * 0.09), 3);

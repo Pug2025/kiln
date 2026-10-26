@@ -1,6 +1,6 @@
 // CPU transforms for the kiln frame and contact lifecycle. No DOM or WebGL renderer exists.
 import { Color, Vector3 as MarkVector3, Group as MarkGroup, Matrix4 as MarkMatrix4 } from './marks-three-stub.mjs';
-export { Color, Vector4, PlaneGeometry, BoxGeometry, RoundedBoxGeometry, TorusGeometry, ShaderMaterial, MeshBasicMaterial } from './marks-three-stub.mjs';
+export { Color, Vector4, PlaneGeometry, BoxGeometry, RoundedBoxGeometry, TorusGeometry, ShaderMaterial, MeshBasicMaterial, InstancedBufferAttribute } from './marks-three-stub.mjs';
 export { PlaneGeometry as RingGeometry } from './marks-three-stub.mjs';
 export const CustomBlending = 5, OneFactor = 201, OneMinusSrcAlphaFactor = 205, AdditiveBlending = 3;
 export class Vector3 extends MarkVector3 { copy(v) { return this.set(v.x, v.y, v.z); } }

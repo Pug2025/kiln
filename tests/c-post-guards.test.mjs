@@ -18,7 +18,8 @@ const { glassMaterial } = await import('../src/render/materials.js');
 
 function fixture(antialias = false) {
   const calls = [];
-  const gl = { getPixelRatio: () => 2, getContextAttributes: () => ({ antialias }),
+  let target = null;
+  const gl = { getRenderTarget: () => target, setRenderTarget: value => { target = value; }, getPixelRatio: () => 2, getContextAttributes: () => ({ antialias }),
     render: (...args) => calls.push(['direct', ...args]) };
   const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(35, 390 / 844, 10, 8000);
   camera.position.set(0, 150, 2400); camera.lookAt(0, -30, 0); camera.updateMatrixWorld();
@@ -29,7 +30,7 @@ function fixture(antialias = false) {
 
 test('bloom source and final full-resolution blend share the exact fixed guard uniforms', () => {
   const { post, camera } = fixture(), bloom = post.bloom;
-  const stages = [bloom.compositeMaterial, bloom.materialHighPassFilter, bloom.blendMaterial];
+  const stages = [bloom.compositeMaterial, bloom.materialHighPassFilter];
   const initial = stages[0].uniforms;
   for (const material of stages) for (const name of ['uMaskA', 'uMaskB', 'uMaskR', 'uMaskF', 'uRes', 'uBallMasks', 'uBallMaskCount']) {
     assert.equal(material.uniforms[name], initial[name], `${name}: both shader stages observe the same current value`);
@@ -55,7 +56,7 @@ test('actual emitted source and blend kernels give zero body bloom and use max p
   const { post } = fixture();
   // Execute the return expression emitted to each actual material, rather than a second CPU
   // implementation of its policy. Projection/raster coverage is proved separately and natively.
-  for (const material of [post.bloom.materialHighPassFilter, post.bloom.blendMaterial]) {
+  for (const material of [post.bloom.materialHighPassFilter, post.bloom.compositeMaterial]) {
     const expression = material.fragmentShader.match(/float bloomTransmission\(\)\s*\{\s*return ([^;]+);/)[1];
     const kernel = new Function('paddleBand', 'ballBand', 'max', `return ${expression};`);
     const gain = (paddle, ball) => kernel(() => paddle, () => ball, Math.max);
@@ -68,9 +69,8 @@ test('actual emitted source and blend kernels give zero body bloom and use max p
     near(gain(.2, .7), .3, 1e-12);
     for (let i = 0; i <= 10; i++) assert.ok(gain(i / 10, .3) >= 0 && gain(i / 10, .3) <= 1);
   }
-  // Only source rejection and the final additive blend attenuate bloom. The mip composite is
-  // still the native pass, so there is no second feather multiplication before upsampling.
-  assert.equal(post.bloom.compositeMaterial.fragmentShader.includes('bloomTransmission'), false);
+  assert.equal(post.bloom.compositeMaterial, post.composer.passes.at(-1).material,
+    'the diagnostic guards are the real final output uniforms');
   post.dispose();
 });
 
@@ -80,7 +80,7 @@ test('Lite, menus, reset and disposal preserve post routes and clear stale multi
     const clip = new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse).elements;
     const world = { balls: Array.from({ length: BALL.MAX }, (_, i) => ({ alive: true, held: true,
       sealed: -1, r: BALL.R, x: 45 + 50 * i, y: 450 })) };
-    const uniforms = post.bloom.blendMaterial.uniforms, buffer = uniforms.uBallMasks.value;
+    const uniforms = post.bloom.compositeMaterial.uniforms, buffer = uniforms.uBallMasks.value;
     post.setBallMasks(world, .5, clip, 780, 1688, true);
     assert.equal(uniforms.uBallMaskCount.value, BALL.MAX);
     post.render(); assert.equal(calls.at(-1)[0], 'composer');
@@ -88,8 +88,8 @@ test('Lite, menus, reset and disposal preserve post routes and clear stale multi
     assert.equal(uniforms.uBallMaskCount.value, 0); assert.ok(buffer.every(v => v === 0));
     post.setBallMasks(world, .5, clip, 780, 1688, true);
     post.setBloom(false); post.render();
-    assert.equal(post.direct, antialias);
-    assert.equal(calls.at(-1)[0], antialias ? 'direct' : 'composer');
+    assert.equal(post.direct, false);
+    assert.equal(calls.at(-1)[0], 'composer', 'Lite shares the linear route regardless of canvas attributes');
     assert.equal(uniforms.uBallMaskCount.value, 0); assert.ok(buffer.every(v => v === 0));
     post.setBloom(true); post.render(); assert.equal(calls.at(-1)[0], 'composer');
     post.setBallMasks(world, .5, clip, 780, 1688, true); post.clearBallMasks();
@@ -99,20 +99,20 @@ test('Lite, menus, reset and disposal preserve post routes and clear stale multi
   }
 });
 
-test('native additive blend applies the feather once without attenuating its source alpha', () => {
-  const { post } = fixture(), material = post.bloom.blendMaterial;
-  assert.equal(material.blending, THREE.AdditiveBlending);
-  assert.equal(material.premultipliedAlpha, false, 'native r160 additive factors are SRC_ALPHA, ONE');
-  const expression = material.fragmentShader.match(/float bloomTransmission\(\)\s*\{\s*return ([^;]+);/)[1];
-  const kernel = new Function('paddleBand', 'ballBand', 'max', `return ${expression};`);
-  const assignment = material.fragmentShader.match(/gl_FragColor(\.rgb)?\s*\*=\s*bloomTransmission\(\)/);
-  assert.ok(assignment, 'actual final shader applies the guard');
+test('output combine preserves native composite alpha energy and applies the final feather once', () => {
+  const { post } = fixture(), material = post.bloom.compositeMaterial;
+  // Execute the RGB contribution emitted by the real output material. The native reference
+  // scales RGBA by k, then SRC_ALPHA,ONE contributes k*k*rgb*alpha, with no alpha guard.
+  const expression = material.fragmentShader.match(/gl_FragColor\.rgb \+= ([^;]+);/)[1]
+    .replaceAll('bloom.rgb', 'rgb').replaceAll('bloom.a', 'alpha').replace('bloomTransmission()', 'transmission');
+  const combine = new Function('rgb', 'alpha', 'transmission', 'uBloomEnabled', `return ${expression};`);
+  const k = material.uniforms.uBloomFactor.value;
+  near(k, .1656, 1e-12);
   for (const band of [0, .25, .5, .75, 1]) for (const srcAlpha of [.2, .55, 1]) {
-    const transmission = kernel(() => band, () => 0, Math.max), srcRGB = .8;
-    const rgb = srcRGB * transmission;
-    const alpha = assignment[1] ? srcAlpha : srcAlpha * transmission;
-    const contribution = rgb * alpha; // r160 non-premultiplied additive source term
-    near(contribution, srcRGB * srcAlpha * (1 - band), 1e-12, 'one linear feather, without a T-squared valley');
+    const actual = combine(.8 * k, srcAlpha * k, 1 - band, 1);
+    near(actual, .8 * srcAlpha * .02742336 * (1 - band), 1e-12,
+      'native unnormalized RGBA gain survives, without squaring the protection feather');
+    assert.equal(combine(.8 * k, srcAlpha * k, 1 - band, 0), 0, 'Lite contribution is dynamically zero');
   }
   post.dispose();
 });

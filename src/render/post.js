@@ -1,224 +1,147 @@
-// Kiln: post-processing (OWNER: C). ACES tone mapping, half-resolution UnrealBloomPass (strength
-// 0.18, radius 0.10, threshold 0.9, one tight mip), HalfFloat target with 4x MSAA. The output pass also carries
-// the last-life desaturation (10%). Lite has no bloom: straight to the canvas when the canvas is
-// multisampled (booted in lite), else through the composer's 2x target with the bloom pass off.
-
+// Kiln: one linear Full/Lite scene route, three tight bloom draws and one guarded output.
+// Only the output applies ACES, last-life saturation and sRGB. Lite skips every bloom draw.
 import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
-import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { LOOK } from './look.js';
 import { BALL_BLOOM, writeBallBloom, paddleBloomRadius } from './ball-bloom.js';
+import { TightBloomPass, BLOOM_GUARD_GLSL, tightBloomFactor } from './bloom.js';
 
 const MSAA_PARAM = (() => {
   const v = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('msaa') : null;
   return v === '0' || v === '2' || v === '4' ? Number(v) : -1;
 })();
 
-// Item 19 keeps only the tightest glow scale, without the broad scattering blur pairs.
-// Pin the native source before changing its hardcoded five-sampler composite. A vendor update
-// must be reviewed rather than silently reading textures that were never rendered.
-function useTightBloomMip(bloom) {
-  const cm = bloom.compositeMaterial;
-  const pinned = `varying vec2 vUv;
-				uniform sampler2D blurTexture1;
-				uniform sampler2D blurTexture2;
-				uniform sampler2D blurTexture3;
-				uniform sampler2D blurTexture4;
-				uniform sampler2D blurTexture5;
-				uniform float bloomStrength;
-				uniform float bloomRadius;
-				uniform float bloomFactors[NUM_MIPS];
-				uniform vec3 bloomTintColors[NUM_MIPS];
-
-				float lerpBloomFactor(const in float factor) {
-					float mirrorFactor = 1.2 - factor;
-					return mix(factor, mirrorFactor, bloomRadius);
-				}
-
-				void main() {
-					gl_FragColor = bloomStrength * ( lerpBloomFactor(bloomFactors[0]) * vec4(bloomTintColors[0], 1.0) * texture2D(blurTexture1, vUv) +
-						lerpBloomFactor(bloomFactors[1]) * vec4(bloomTintColors[1], 1.0) * texture2D(blurTexture2, vUv) +
-						lerpBloomFactor(bloomFactors[2]) * vec4(bloomTintColors[2], 1.0) * texture2D(blurTexture3, vUv) +
-						lerpBloomFactor(bloomFactors[3]) * vec4(bloomTintColors[3], 1.0) * texture2D(blurTexture4, vUv) +
-						lerpBloomFactor(bloomFactors[4]) * vec4(bloomTintColors[4], 1.0) * texture2D(blurTexture5, vUv) );
-				}`;
-  if (bloom.nMips !== 5 || cm.defines.NUM_MIPS !== 5 || cm.fragmentShader !== pinned
-    || bloom.renderTargetsHorizontal.length !== 5 || bloom.renderTargetsVertical.length !== 5
-    || bloom.separableBlurMaterials.length !== 5 || cm.uniforms.bloomFactors.value.length !== 5
-    || bloom.bloomTintColors.length !== 5) throw new Error('Kiln bloom requires the pinned r160 five-mip source');
-  cm.fragmentShader = pinned
-    .replace(/\n\t{4}uniform sampler2D blurTexture[2-5];/g, '')
-    .replace(/texture2D\(blurTexture1, vUv\) \+[\s\S]*?texture2D\(blurTexture5, vUv\)/,
-      'texture2D(blurTexture1, vUv)');
-  bloom.nMips = cm.defines.NUM_MIPS = 1;
-  cm.uniforms.bloomFactors.value.length = 1;
-  bloom.bloomTintColors.length = 1;
-  for (let i = 2; i <= 5; i++) delete cm.uniforms[`blurTexture${i}`];
-  cm.needsUpdate = true;
-  // Keep all five constructor targets/materials owned. Native disposal loops their full array
-  // lengths, while rendering/resizing loops only nMips, so inactive resources are never sampled.
+function replaceOnce(source, anchor, replacement) {
+  if (source.split(anchor).length !== 2) throw new Error('Kiln output requires the pinned r160 shader');
+  return source.replace(anchor, replacement);
 }
 
 export function createPost(gl, scene, camera) {
   const rt = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 });
   const composer = new EffectComposer(gl, rt);
   const renderPass = new RenderPass(scene, camera);
-  const bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), LOOK.BLOOM_STRENGTH, LOOK.BLOOM_RADIUS, LOOK.BLOOM_THRESHOLD);
-  useTightBloomMip(bloom);
-  // round halos (C call, review 2026-10-22): three's blur kernels use sigma = kernel radius and stop
-  // at one sigma, which is nearly a box filter, so a small bright source (the ball) bloomed as a soft
-  // square. Sigma = radius / 2.5 makes each pass a true Gaussian (the 2D result is round); the shader
-  // normalises the weights, so the strength is unchanged.
-  for (const m of bloom.separableBlurMaterials) {
-    const R = m.defines.KERNEL_RADIUS;
-    const s = R / 2.5;
-    const c = m.uniforms.gaussianCoefficients.value;
-    for (let i = 0; i < R; i++) c[i] = Math.exp((-0.5 * i * i) / (s * s));
-  }
-  const output = new OutputPass();
-  // desaturation for the last-life escalation, applied after tone mapping, before sRGB
-  output.material.uniforms.uSat = { value: 1 };
-  output.material.fragmentShader = output.material.fragmentShader
-    .replace('void main() {', 'uniform float uSat;\nvoid main() {')
-    .replace('// color space', 'gl_FragColor.rgb = mix(vec3(dot(gl_FragColor.rgb, vec3(0.2126, 0.7152, 0.0722))), gl_FragColor.rgb, uSat);\n\t// color space');
-  // Item 19: no bloom on the paddle or balls. Suppress their bright source before blur, then
-  // reject surrounding bloom at the final full-resolution additive blend. Guarding only the
-  // half-resolution composite would let its later interpolation bleed across the sharp edge.
-  const cm = bloom.compositeMaterial;
   const guards = {
     uMaskA: { value: new Float32Array([-1e4, -1e4]) },
     uMaskB: { value: new Float32Array([-1e4, -1e4]) },
-    uMaskR: { value: 1 },
-    uMaskF: { value: 1 },
+    uMaskR: { value: 1 }, uMaskF: { value: 1 },
     uRes: { value: new Float32Array([1, 1]) },
     uBallMasks: { value: new Float32Array(BALL_BLOOM.MAX * 4) },
     uBallMaskCount: { value: 0 },
   };
-  // Keep the existing public composite uniforms as aliases to the same fixed buffers.
-  Object.assign(cm.uniforms, guards);
-  const guardGLSL = `uniform vec2 uMaskA, uMaskB, uRes; uniform float uMaskR, uMaskF;
-    uniform vec4 uBallMasks[${BALL_BLOOM.MAX}]; uniform int uBallMaskCount;
-    float paddleBand(){
-      vec2 p = vUv * uRes, pa = p - uMaskA, ba = uMaskB - uMaskA;
-      float k = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-4), 0.0, 1.0);
-      return 1.0 - smoothstep(uMaskR, uMaskR + uMaskF, length(pa - ba * k));
-    }
-    float ballBand(){
-      if (uBallMaskCount == 0) return 0.0;
-      vec2 p = vUv * uRes;
-      float band = 0.0;
-      for (int i = 0; i < ${BALL_BLOOM.MAX}; i++) {
-        if (i >= uBallMaskCount) break;
-        vec4 mask = uBallMasks[i];
-        band = max(band, 1.0 - smoothstep(mask.z, mask.z + mask.w, length(p - mask.xy)));
-      }
-      return band;
-    }
-    float bloomTransmission(){ return 1.0 - max(paddleBand(), ballBand()); }
-    void main() {`;
-  for (const material of [bloom.materialHighPassFilter, bloom.blendMaterial]) {
-    Object.assign(material.uniforms, guards);
-    const fs = material.fragmentShader, end = fs.lastIndexOf('}');
-    // The final non-premultiplied additive draw uses SRC_ALPHA, ONE. Preserve its native alpha
-    // so the feather weights RGB once, rather than squaring the transmission in the blend.
-    const channel = material === bloom.blendMaterial ? '.rgb' : '';
-    material.fragmentShader = fs.slice(0, end).replace('void main() {', guardGLSL)
-      + `\n  gl_FragColor${channel} *= bloomTransmission();\n}`;
-    material.needsUpdate = true;
-  }
-
+  const bloom = new TightBloomPass(guards);
+  const blank = new THREE.DataTexture(new Uint8Array(4), 1, 1);
+  blank.name = 'KilnBloom.black';
+  blank.colorSpace = THREE.NoColorSpace;
+  blank.generateMipmaps = false;
+  blank.needsUpdate = true;
+  const output = new OutputPass();
+  let shader = output.material.fragmentShader;
+  shader = replaceOnce(shader, 'void main() {', `${BLOOM_GUARD_GLSL}
+    uniform sampler2D uBloomTexture; uniform float uBloomEnabled, uBloomFactor, uSat;
+    void main() {`);
+  shader = replaceOnce(shader, 'gl_FragColor = texture2D( tDiffuse, vUv );', `gl_FragColor = texture2D( tDiffuse, vUv );
+    vec4 bloom = texture2D(uBloomTexture, vUv) * uBloomFactor;
+    // Native composite scales RGBA; SRC_ALPHA,ONE then weights RGB by that scaled alpha.
+    // Only RGB receives the final guard, so its feather is applied once, including overlap.
+    gl_FragColor.rgb += bloom.rgb * bloom.a * bloomTransmission() * uBloomEnabled;
+    gl_FragColor.a += bloom.a * bloom.a * uBloomEnabled;`);
+  shader = replaceOnce(shader, '// color space', `gl_FragColor.rgb = mix(vec3(dot(gl_FragColor.rgb, vec3(0.2126, 0.7152, 0.0722))), gl_FragColor.rgb, uSat);
+    // color space`);
+  output.material.fragmentShader = shader;
+  Object.assign(output.uniforms, guards, {
+    uBloomTexture: { value: bloom.texture }, uBloomEnabled: { value: 1 },
+    uBloomFactor: { value: tightBloomFactor(bloom.strength, bloom.radius) }, uSat: { value: 1 },
+  });
+  // The public mask diagnostic is the actual output combine, not a detached compatibility copy.
+  bloom.compositeMaterial = output.material;
   composer.addPass(renderPass);
   composer.addPass(bloom);
   composer.addPass(output);
 
-  let useBloom = true;
-  let msaaOff = false;
-  // canvasAA: the canvas itself is multisampled (the renderer asks for that only when it boots in
-  // lite). Without it, lite still goes through the composer (its 2x MSAA target, no bloom) so its
-  // edges stay smooth; with it, lite draws straight to the canvas. Full quality always uses the
-  // composer's target, so a full-quality canvas needs neither MSAA nor depth (review 2026-10-22).
+  const warmTarget = new THREE.WebGLRenderTarget(1, 1, {
+    type: THREE.HalfFloatType, depthBuffer: false, stencilBuffer: false, samples: 0,
+  });
+  warmTarget.texture.name = 'KilnBloom.warm-output';
+  const viewport = new THREE.Vector4(), scissor = new THREE.Vector4();
+  const warmInput = { texture: blank };
+  let useBloom = true, msaaOff = false, disposed = false;
   const canvasAA = !!gl.getContextAttributes()?.antialias;
 
   return {
-    composer,
-    bloom,
-    canvasAA,
-    paddleBloomRadius,
-
-    /** Lite draws straight to the canvas (the CSS filter then carries the last-life desaturation). */
-    get direct() {
-      return !useBloom && canvasAA;
-    },
+    composer, bloom, canvasAA, paddleBloomRadius,
+    get direct() { return false; },
 
     setSize(W, H, pr) {
-      // MSAA: 4x at low pixel ratios; at 2x the pixels are small enough that 2x samples hold the
-      // glass edges, at half the resolve cost on a phone GPU (C call). Lite through the composer: 2x
-      // at 1x pixel ratio. ?msaa=0|2|4 overrides (QA).
-      // The quality ladder's first step turns it off (msaaOff).
-      const s = MSAA_PARAM >= 0 ? MSAA_PARAM : msaaOff ? 0 : !useBloom ? LOOK.MSAA_LITE : pr >= 1.75 ? LOOK.MSAA_HI_DPR : LOOK.MSAA;
-      if (composer.renderTarget1.samples !== s) {
-        for (const t of [composer.renderTarget1, composer.renderTarget2]) { t.samples = s; t.dispose(); }
+      const samples = MSAA_PARAM >= 0 ? MSAA_PARAM : msaaOff ? 0 : !useBloom ? LOOK.MSAA_LITE : pr >= 1.75 ? LOOK.MSAA_HI_DPR : LOOK.MSAA;
+      if (composer.renderTarget1.samples !== samples) {
+        for (const target of [composer.renderTarget1, composer.renderTarget2]) { target.samples = samples; target.dispose(); }
       }
       composer.setPixelRatio(pr);
-      // the composer hands every pass the full drawing size, and UnrealBloomPass halves it itself:
-      // that IS the half-resolution bloom of ART 7 (a second halving here ran the bright pass at a
-      // quarter and drew a square halo round the ball: review 2026-10-22)
       composer.setSize(W, H);
-      cm.uniforms.uRes.value[0] = W * pr;
-      cm.uniforms.uRes.value[1] = H * pr;
+      guards.uRes.value[0] = W * pr;
+      guards.uRes.value[1] = H * pr;
     },
 
     setBloom(on) {
-      useBloom = on;
-      bloom.enabled = on;
-      if (!on) this.clearBallMasks();
+      useBloom = !!on;
+      bloom.enabled = useBloom;
+      output.uniforms.uBloomEnabled.value = useBloom ? 1 : 0;
+      output.uniforms.uBloomTexture.value = useBloom ? bloom.texture : blank;
+      if (!useBloom) this.clearBallMasks();
     },
-
-    /** The quality ladder: composer MSAA off (applies at the next setSize). */
-    setMsaaOff(off) {
-      msaaOff = !!off;
+    setMsaaOff(off) { msaaOff = !!off; },
+    get bloomOn() { return useBloom; },
+    setBloomMask(ax, ay, bx, by, radius, feather) {
+      guards.uMaskA.value[0] = ax; guards.uMaskA.value[1] = ay;
+      guards.uMaskB.value[0] = bx; guards.uMaskB.value[1] = by;
+      guards.uMaskR.value = radius; guards.uMaskF.value = feather;
     },
-
-    get bloomOn() {
-      return useBloom;
-    },
-
-    /** Paddle capsule in drawing-buffer pixels (origin bottom-left), radius and feather in pixels. */
-    setBloomMask(ax, ay, bx, by, r, f) {
-      cm.uniforms.uMaskA.value[0] = ax;
-      cm.uniforms.uMaskA.value[1] = ay;
-      cm.uniforms.uMaskB.value[0] = bx;
-      cm.uniforms.uMaskB.value[1] = by;
-      cm.uniforms.uMaskR.value = r;
-      cm.uniforms.uMaskF.value = f;
-    },
-
-    /** Gameplay circles, after the actual camera moved; the paddle mask stays in place. */
     setBallMasks(world, alpha, clip, width, height, gameplay) {
-      cm.uniforms.uBallMaskCount.value = writeBallBloom(cm.uniforms.uBallMasks.value,
+      guards.uBallMaskCount.value = writeBallBloom(guards.uBallMasks.value,
         world, alpha, clip, width, height, useBloom && gameplay);
     },
+    clearBallMasks() { guards.uBallMaskCount.value = 0; guards.uBallMasks.value.fill(0); },
+    setSaturation(saturation) { output.uniforms.uSat.value = saturation; },
 
-    clearBallMasks() {
-      cm.uniforms.uBallMaskCount.value = 0;
-      cm.uniforms.uBallMasks.value.fill(0);
+    // Four offscreen draws prepare both bloom programs, owned targets and the real output
+    // variant even when booting Lite. No scene/gameplay draw, time advance or readiness signal.
+    warmUp() {
+      const target = gl.getRenderTarget(), autoClear = gl.autoClear;
+      gl.getViewport(viewport); gl.getScissor(scissor);
+      const scissorTest = gl.getScissorTest(), renderToScreen = output.renderToScreen;
+      const texture = output.uniforms.uBloomTexture.value, enabled = output.uniforms.uBloomEnabled.value;
+      const input = output.uniforms.tDiffuse.value;
+      try {
+        gl.initTexture(blank);
+        gl.setScissorTest(false);
+        bloom.render(gl, null, warmInput);
+        output.uniforms.uBloomTexture.value = bloom.texture;
+        output.uniforms.uBloomEnabled.value = 1;
+        output.uniforms.uBloomFactor.value = tightBloomFactor(bloom.strength, bloom.radius);
+        output.renderToScreen = false;
+        output.render(gl, warmTarget, warmInput);
+      } finally {
+        output.renderToScreen = renderToScreen;
+        output.uniforms.uBloomTexture.value = texture;
+        output.uniforms.uBloomEnabled.value = enabled;
+        output.uniforms.tDiffuse.value = input;
+        gl.autoClear = autoClear;
+        // Restore canvas defaults first; binding last reapplies a caller target's own state.
+        gl.setViewport(viewport); gl.setScissor(scissor); gl.setScissorTest(scissorTest);
+        gl.setRenderTarget(target);
+      }
     },
-
-    setSaturation(s) {
-      output.material.uniforms.uSat.value = s;
-    },
-
     render() {
-      if (!useBloom && canvasAA) gl.render(scene, camera);
-      else composer.render();
+      const target = gl.getRenderTarget();
+      output.uniforms.uBloomFactor.value = tightBloomFactor(bloom.strength, bloom.radius);
+      try { composer.render(); } finally { gl.setRenderTarget(target); }
     },
-
     dispose() {
-      rt.dispose();
-      composer.dispose?.();
-      bloom.dispose?.();
+      if (disposed) return;
+      disposed = true;
+      composer.dispose(); bloom.dispose(); output.dispose(); blank.dispose(); warmTarget.dispose();
     },
   };
 }

@@ -80,12 +80,9 @@ export async function createRenderer(host, opts = {}) {
   if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
   host.appendChild(vignette);
 
-  // C call (review 2026-10-22): the canvas is multisampled (and has a depth buffer) only when the
-  // game boots in lite, the one path that draws the scene straight to it. Full quality draws into the
-  // composer's own MSAA target and only an output quad reaches the canvas, so a multisampled
-  // backbuffer there was memory and a resolve per frame for nothing (780x1688 on a 3x phone).
-  const bootLite = !!opts.lite;
-  const gl = new THREE.WebGLRenderer({ canvas, antialias: bootLite, depth: bootLite, stencil: false, powerPreference: 'high-performance' });
+  // Full and Lite render the scene into the composer's MSAA target. Only the final output quad
+  // reaches the canvas, so the backbuffer needs neither multisampling nor a depth attachment.
+  const gl = new THREE.WebGLRenderer({ canvas, antialias: false, depth: false, stencil: false, powerPreference: 'high-performance' });
   gl.outputColorSpace = THREE.SRGBColorSpace;
   gl.toneMapping = THREE.ACESFilmicToneMapping;
   gl.toneMappingExposure = LOOK.EXPOSURE;
@@ -231,7 +228,7 @@ export async function createRenderer(host, opts = {}) {
     canvas.classList.toggle('menu', menuOn);
     canvas.style.filter = menuOn
       ? `${blur ? `blur(${LOOK.MENU_BLUR_PX}px) ` : ''}brightness(${1 - LOOK.MENU_DIM})`
-      : (post.direct && esc > 0.001 ? `saturate(${1 - LOOK.DESAT_LAST * esc})` : '');
+      : '';
     canvas.style.transform = menuOn && blur && !q.reduceMotion ? 'scale(1.06)' : '';
   }
 
@@ -361,6 +358,7 @@ export async function createRenderer(host, opts = {}) {
    */
   function warmUp() {
     unifyStandardMaterials(scene, M.tex);
+    const previousTarget = gl.getRenderTarget();
     const hidden = [];
     scene.traverse((o) => {
       if (!o.visible) {
@@ -372,19 +370,18 @@ export async function createRenderer(host, opts = {}) {
       gl.initTexture(M.tex.neutralMap);
       gl.initTexture(M.tex.neutralNormal);
       actors.warmTextures(gl);
-      // both output paths: straight to the canvas (lite: ACES + sRGB in each shader) and into the
-      // composer's target (bloom: linear, no tone mapping). three compiles a separate program for
-      // each, and a first drop or burst on the bloom path cost a 80-150 ms compile under 4x throttle.
-      gl.setRenderTarget(null);
-      gl.compile(scene, camera);
+      // Both qualities draw the scene linearly. Prepare that variant, then reflect the compiled
+      // drop and streak maps before their first actual draw, including late-kit/context variants.
       gl.setRenderTarget(post.composer.renderTarget1);
       gl.compile(scene, camera);
-      gl.setRenderTarget(null);
       actors.warmPrograms(gl);
+      post.warmUp();
     } catch (e) {
       console.warn('[kiln] shader warm-up', e);
+    } finally {
+      gl.setRenderTarget(previousTarget);
+      for (const o of hidden) o.visible = false;
     }
-    for (const o of hidden) o.visible = false;
   }
 
   // ---- per-frame helpers (no allocation) ----
@@ -437,17 +434,6 @@ export async function createRenderer(host, opts = {}) {
   function leadX(w) {
     for (let i = 0; i < w.balls.length; i++) if (w.balls[i].alive && w.balls[i].sealed < 0) return w.balls[i].x;
     return w.paddle.x;
-  }
-
-  function trail(w, alpha) {
-    for (let i = 0; i < w.balls.length; i++) {
-      const b = w.balls[i];
-      if (!b.alive || b.held || b.sealed >= 0) continue;
-      if (Math.random() < 0.5) {
-        const x = b.px + (b.x - b.px) * alpha, y = b.py + (b.y - b.py) * alpha;
-        fx.burst(x - HW, HH - y, 2, 1, 1, 60, 5, 1, LOOK.TRAIL_GAIN);
-      }
-    }
   }
 
   function timing(now) {
@@ -547,7 +533,6 @@ export async function createRenderer(host, opts = {}) {
         syncPaletteUniforms();
         vignette.style.opacity = String(LOOK.VIGNETTE + (LOOK.VIGNETTE_LAST - LOOK.VIGNETTE) * esc);
         post.setSaturation(1 - LOOK.DESAT_LAST * esc);
-        if (post.direct && Math.abs(esc - prevEsc) > 0.02) applyMenu();
       }
 
       // fire: breathes with the combo, flares on hits and losses
@@ -568,7 +553,6 @@ export async function createRenderer(host, opts = {}) {
       boss.frame(w, alpha, t, fi);
       trailFx.frame(w, alpha, t);
       overlays.frame(w, alpha, t, dt);
-      trail(w, alpha);
       fx.frame(dt, t);
       rig.update(t, dt, leadX(w), w.fx);
       bloomMask(w, alpha);

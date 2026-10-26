@@ -93,6 +93,33 @@ test('laser and fire extinguish every armour line and hidden or broken cells dra
   assert.equal(r.lines.count, 0);
 });
 
+test('metal seams warm on real damage, keep readable phone tips and reset when draw slots become glass', () => {
+  for (const small of [false, true]) {
+    const r = setup('A', { small, scale: 0.2901833621 });
+    const styles = r.lines.geometry.attributes.aMetalLine.array;
+    for (let i = 0; i < r.lines.count; i++) {
+      const m = r.lines.matrices[i], offset = i * 3;
+      assert.ok(styles[offset] > 0, 'armour keeps a machined seam');
+      if (small) {
+        assert.ok(m[4] * 0.2901833621 >= 3, 'readable tip ink meets the phone width floor');
+        assert.ok(m[5] * styles[offset + 1] * 0.2901833621 >= 3, 'tip height, not backing or stem, meets the floor');
+      } else assert.ok(Math.abs(m[4] - 0.9) < 1e-6, 'desktop recovers the original fine cut');
+    }
+    r.hit(r.i); r.marks.hit(r.i, 1); r.frame(1);
+    assert.equal(visible(r.lines), 3, 'the lost seam briefly flashes with the surviving seams');
+    assert.equal(styles[2], 1, 'a surviving seam answers the impact');
+    r.rebuild(); r.frame(1.08);
+    assert.ok(styles[2] > 0 && styles[2] < 1, 'rebuild retains the fading hit warmth');
+    r.frame(1.2);
+    assert.equal(visible(r.lines), 2, 'the count always means hits left');
+    assert.equal(styles[2], 0, 'the metal cools back to its quiet rest');
+    r.B.type[r.i] = BRICK.NUMBERED; r.rebuild(); r.frame(2);
+    assert.ok(styles.slice(0, r.lines.count * 3).every(v => v === 0), 'a reused glass slot cannot retain metal clipping or warmth');
+    r.marks.setWorld(r.world, r.world.level.mode); r.rebuild(); r.frame(0);
+    assert.ok(styles.slice(0, r.lines.count * 3).every(v => v === 0), 'new worlds have no stale seam state');
+  }
+});
+
 
 test('HP5-9 fallback glyphs stay contained, update without wall versions and return to four lines', () => {
   for (let hp = 5; hp <= 9; hp++) {

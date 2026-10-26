@@ -29,7 +29,8 @@ test('local Three.js is the exact pinned MIT package with unchanged selected sou
 test('all mandatory entry dependencies are local, observed by preload and shipped for atomic offline install', () => {
   const modules = startupModules(root);
   assert.deepEqual(readPreloads(read('index.html')), modules);
-  assert.equal(modules.filter((path) => path.startsWith(base)).length, 12);
+  assert.equal(modules.filter((path) => path.startsWith(base)).length, 10);
+  assert.ok(!modules.some((path) => /UnrealBloomPass|LuminosityHighPassShader/.test(path)), 'owned bloom no longer preloads the unused native chain');
   assert.ok(!modules.some((path) => /GLTFLoader|BufferGeometryUtils/.test(path)), 'optional model loading stays optional at startup');
   const shipped = new Set(shippedFiles(gitFiles(root)));
   for (const path of modules) assert.ok(shipped.has(path), `${path} ships`);

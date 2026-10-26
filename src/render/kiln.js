@@ -7,7 +7,7 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { FIELD, RING, HORIZONTAL } from '../core/constants.js';
 import { PAL, PAL_VEC3 } from './materials.js';
 import { LOOK } from './look.js';
-import { PLAIN_VERT, HAZE_FRAG, BACK_VERT, BACK_FRAG, SHAFT_FRAG, withOutput } from './shaders.js';
+import { PLAIN_VERT, HAZE_VERT, HAZE_FRAG, BACK_VERT, BACK_FRAG, SHAFT_FRAG, withOutput } from './shaders.js';
 import { CEILING_ART, ceilingLayout, lintelPiece, ceilingContact, isCeilingHit } from './ceiling.js';
 
 const FW = FIELD.W, FH = FIELD.H;
@@ -151,23 +151,55 @@ export function createKiln(scene, M) {
   floor.position.set(0, -705, -200);
   scene.add(floor);
 
-  // ---- haze (four planes; lite keeps the third) ----
-  const hazeGeo = new THREE.PlaneGeometry(1900, 1500);
-  const haze = [];
-  for (const [z, a, w, seed, tint] of [[-90, 0.11, 0.6, 1.3, 0.2], [-260, 0.11, 0.9, 4.1, 0.16], [-480, 0.12, 1.0, 7.7, 0.12], [-760, 0.13, 0.8, 2.2, 0.09]]) {
-    const mat = new THREE.ShaderMaterial({
-      transparent: true,
-      depthWrite: false,
-      uniforms: { uTime: { value: 0 }, uSeed: { value: seed }, uAlpha: { value: a }, uWarm: { value: w }, uTint: { value: tint }, uHeatLo: { value: PAL_VEC3.heatLo } },
-      vertexShader: PLAIN_VERT,
-      fragmentShader: HAZE_FRAG,
-    });
-    const h = new THREE.Mesh(hazeGeo, mat);
-    h.position.set(0, -120, z);
-    h.renderOrder = -3;
-    scene.add(h);
-    haze.push(h);
+  // ---- haze (four layers in three sorted draws; lite keeps original layer two) ----
+  // Only the far pair is contiguous behind the painting over the camera's fitted range. The
+  // -260 and -90 layers stay separate: headroom can sort between them and the far pair.
+  const hazeLayers = [[-90, 0.11, 1.3, 0.2], [-260, 0.11, 4.1, 0.16], [-480, 0.12, 7.7, 0.12], [-760, 0.13, 2.2, 0.09]];
+  const hazeTimes = new Float32Array(4);
+  const hazeParams = new Float32Array(12);
+  for (let i = 0; i < hazeLayers.length; i++) {
+    const [, alpha, seed, tint] = hazeLayers[i];
+    hazeParams.set([seed, alpha, tint], i * 3);
   }
+  const hazeMat = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    uniforms: { uTimes: { value: hazeTimes }, uParams: { value: hazeParams }, uWarm: { value: 0.35 }, uHeatLo: { value: PAL_VEC3.heatLo } },
+    vertexShader: HAZE_VERT,
+    fragmentShader: HAZE_FRAG,
+  });
+  function writeHaze(mesh, indices) {
+    const attr = mesh.geometry.attributes.aHaze;
+    for (let i = 0; i < indices.length; i++) {
+      const index = indices[i], [z, alpha, seed, tint] = hazeLayers[index];
+      m4.makeTranslation(0, 0, z - mesh.position.z);
+      mesh.setMatrixAt(i, m4);
+      const offset = i * 4;
+      attr.array[offset] = seed; attr.array[offset + 1] = alpha;
+      attr.array[offset + 2] = tint; attr.array[offset + 3] = index;
+    }
+    mesh.count = indices.length;
+    mesh.instanceMatrix.needsUpdate = true;
+    attr.needsUpdate = true;
+    mesh.computeBoundingSphere();
+  }
+  function hazeBatch(name, z, indices) {
+    const geo = new THREE.PlaneGeometry(1900, 1500);
+    geo.setAttribute('aHaze', new THREE.InstancedBufferAttribute(new Float32Array(indices.length * 4), 4));
+    const mesh = new THREE.InstancedMesh(geo, hazeMat, indices.length);
+    mesh.name = name;
+    mesh.position.set(0, -120, z);
+    mesh.renderOrder = -3;
+    writeHaze(mesh, indices);
+    scene.add(mesh);
+    return mesh;
+  }
+  const fullFar = [3, 2], oneFar = [2];
+  const farHaze = hazeBatch('kiln-haze-far', -480, fullFar);
+  const middleHaze = hazeBatch('kiln-haze-middle', -260, [1]);
+  const nearHaze = hazeBatch('kiln-haze-near', -90, [0]);
+  const haze = [farHaze, middleHaze, nearHaze];
+  let oneHaze = false;
 
   // ---- one soft light shaft from the upper left ----
   const shaftMat = new THREE.ShaderMaterial({
@@ -368,7 +400,12 @@ export function createKiln(scene, M) {
       // intensity, not visibility: a change in the light count would recompile every material
       rim.intensity = lite ? 0 : 0.7;
       const one = lite || hazeOne;
-      for (let i = 0; i < haze.length; i++) haze[i].visible = !one || i === 2;
+      if (one !== oneHaze) {
+        writeHaze(farHaze, one ? oneFar : fullFar);
+        middleHaze.count = nearHaze.count = one ? 0 : 1;
+        oneHaze = one;
+      }
+      for (let i = 0; i < haze.length; i++) haze[i].visible = haze[i].count > 0;
     },
 
     /** fi = the one fire number; glowMul from the wall firing. */
@@ -378,11 +415,8 @@ export function createKiln(scene, M) {
       deepLight.intensity = 30000 + 30000 * fi;
       bedMat.opacity = 0.5 + 0.35 * fi;
       shaftMat.uniforms.uTime.value = t;
-      for (let i = 0; i < haze.length; i++) {
-        const u = haze[i].material.uniforms;
-        u.uTime.value = t + i * 7;
-        u.uWarm.value = 0.35 + 0.45 * fi;
-      }
+      for (let i = 0; i < 4; i++) hazeTimes[i] = t + i * 7;
+      hazeMat.uniforms.uWarm.value = 0.35 + 0.45 * fi;
       return breakBoost;
     },
   };

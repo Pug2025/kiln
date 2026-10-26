@@ -25,11 +25,12 @@ export function createBoss(scene, M) {
 
   // The model is dressing behind the live collision cells. Its throat/petals must leave the
   // same routes visibly open; shader cuts retain the cowl, flues, shoulders and curved hardware.
-  const trimOrigin = { value: new THREE.Vector2() };
-  const throat = { value: new THREE.Vector3(-182, 182, -40) };
-  const innerGaps = { value: [new THREE.Vector4(), new THREE.Vector4()] };
-  const outerGaps = { value: [new THREE.Vector4(), new THREE.Vector4()] };
-  const throatScratch = new Float32Array(3), gapScratch = new Float32Array(8);
+  // Upload-only values stay flat, like the shared palette, to avoid scalar boxing per draw.
+  // Inner and outer rings keep distinct buffers because both uniforms can be live together.
+  const trimOrigin = { value: new Float32Array(2) };
+  const throat = { value: new Float32Array([-182, 182, -40]) };
+  const innerGaps = { value: new Float32Array(8) };
+  const outerGaps = { value: new Float32Array(8) };
   const trimCache = new Map();
   const trimSources = [];
   function trimMaterial(base, kind) {
@@ -225,15 +226,13 @@ export function createBoss(scene, M) {
       root.visible = true;
       root.position.x = B.px + (B.x - B.px) * alpha - HW;
       root.position.y = HH - (B.py + (B.y - B.py) * alpha);
-      trimOrigin.value.set(root.position.x, root.position.y);
+      trimOrigin.value[0] = root.position.x;
+      trimOrigin.value[1] = root.position.y;
       if (B.id === 'stoker') {
-        stokerThroat(world, throatScratch);
-        throat.value.set(throatScratch[0], throatScratch[1], throatScratch[2]);
+        stokerThroat(world, throat.value);
       } else {
-        orbitApertures(world, alpha, 0, gapScratch);
-        for (let k = 0; k < 2; k++) innerGaps.value[k].fromArray(gapScratch, k * 4);
-        orbitApertures(world, alpha, 1, gapScratch);
-        for (let k = 0; k < 2; k++) outerGaps.value[k].fromArray(gapScratch, k * 4);
+        orbitApertures(world, alpha, 0, innerGaps.value);
+        orbitApertures(world, alpha, 1, outerGaps.value);
       }
       const ang = B.pangle + (B.angle - B.pangle) * alpha;
       const open = Math.max(0, Math.min(1, B.open || 0));

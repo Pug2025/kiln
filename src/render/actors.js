@@ -11,6 +11,7 @@ import { LOOK } from './look.js';
 import { PAL, glassMaterial } from './materials.js';
 import { withOutput } from './shaders.js';
 import { LASER_MOUNT, laserMountsActive, laserMountPose, laserMuzzleFlash } from './laser-mounts.js';
+import { createBallStreaks } from './trail.js';
 
 const HW = FIELD.W / 2;
 const HH = FIELD.H / 2;
@@ -180,6 +181,7 @@ export function createActors(scene, M) {
   root.add(balls, halos);
   // Keep the diagnostic handle, but do not compile or shade a light configured to emit nothing.
   if (LOOK.BALL_LIGHT > 0) root.add(ballLight);
+  const ballStreaks = createBallStreaks(root);
 
   // ---------------------------------------------------------------- paddle
   const pad = new THREE.Group();
@@ -597,6 +599,7 @@ export function createActors(scene, M) {
 
     setWorld(world) {
       mode = world.level.mode;
+      ballStreaks.reset();
       balls.count = 0;
       halos.count = 0;
       ballLight.intensity = 0;
@@ -645,11 +648,13 @@ export function createActors(scene, M) {
           warmed.add(program);
         }
       }
+      ballStreaks.warmPrograms(gl);
     },
 
     frame(world, alpha, t, fire, dt) {
       setPaddle(world, t, fire, dt);
       setBalls(world, alpha, t);
+      ballStreaks.frame(world, alpha);
       setEmbers(world, alpha);
       setDrops(world, alpha);
     },

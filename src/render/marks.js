@@ -7,7 +7,7 @@
 //                 letter, never by colour
 //   gravity       magnetic clamp under the slab: dark-metal bar, two posts, white 2-unit mark 70%
 //   moving        dark-metal rail with a white hairline (50%) and a sliding shoe under the brick
-//   armoured      recessed titanium channels, lit for hits left; lost lines flash for 0.16 s
+//   armoured      fine ember seams in titanium, with compact readable tips on phones
 // Every kind is one InstancedMesh, rebuilt with the wall and re-posed per frame only for bricks that
 // move, pulse or drift. "Under" means toward the paddle in every mode (left mode turns the slab
 // -90 degrees; ring mode turns each clamp to face outward).
@@ -19,7 +19,7 @@ import { PAL, PAL_VEC3 } from './materials.js';
 import { colorVec3, writeColorVec3 } from './palette-uniforms.js';
 import { withOutput } from './shaders.js';
 import { coreProtected } from './boss-feedback.js';
-import { phoneMarkLayout, hitLineLayout, hitLinePosition, loadedMarkLayout, glyphInkRect, phoneTargetSegment } from './phone-marks.js';
+import { PHONE_MARKS, phoneMarkLayout, hitLineLayout, hitLinePosition, loadedMarkLayout, glyphInkRect, phoneTargetSegment } from './phone-marks.js';
 
 const HW = FIELD.W / 2;
 const HH = FIELD.H / 2;
@@ -134,13 +134,22 @@ export function createMarks(root, M) {
         #include <clipping_planes_vertex>
       }`,
     fragmentShader: withOutput(`precision highp float; varying vec2 vUv; varying float vCell; uniform sampler2D uAtlas; uniform vec3 uColor; uniform float uPhone; uniform vec4 uInk[16];
+      vec4 glyphInk(int cell) {
+        #if __VERSION__ >= 300
+          return uInk[cell];
+        #else
+          // GLSL1 fragment uniform arrays require constant indices, including hidden warm variants.
+          ${Array.from({ length: 15 }, (_, i) => `if (cell == ${i}) return uInk[${i}];`).join('\n          ')}
+          return uInk[15];
+        #endif
+      }
       #include <clipping_planes_pars_fragment>
       void main(){
         #include <clipping_planes_fragment>
         float cell = floor(vCell + 0.5);
         // plane 20x18, atlas cell 64x128 (aspect .5): keep the glyph's aspect, 15 units tall
         vec2 d = vec2((vUv.x - 0.5) * (20.0 / 18.0) / 0.5 * (18.0 / 15.0) + 0.5, (vUv.y - 0.5) * (18.0 / 15.0) + 0.5);
-        if (uPhone > 0.5) { vec4 ink = uInk[int(cell)]; d = ink.xy + vUv * ink.zw; }
+        if (uPhone > 0.5) { vec4 ink = glyphInk(int(cell)); d = ink.xy + vUv * ink.zw; }
         float m = 0.0;
         if (d.x > 0.0 && d.x < 1.0 && d.y > 0.0 && d.y < 1.0) m = texture2D(uAtlas, vec2((cell + d.x) / 16.0, d.y)).r;
         m = smoothstep(0.25, 0.75, m);
@@ -184,20 +193,38 @@ export function createMarks(root, M) {
   // The dark recess keeps the information independent of a molten core or bright titanium.
   // Orange edges and a pale centre use the existing heat palette without additive glow.
   const lineMat = new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false });
+  lineMat.extensions = { derivatives: true };
   lineMat.onBeforeCompile = (shader) => {
     shader.uniforms.uLineHeatLo = { value: PAL_VEC3.heatLo };
     shader.uniforms.uLineHeatHi = { value: PAL_VEC3.heatHi };
+    shader.uniforms.uLineEmber = { value: colorVec3(PAL.warn) };
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nvarying vec2 vLineUv;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvLineUv = uv;');
+      .replace('#include <common>', '#include <common>\nattribute vec3 aMetalLine; varying vec2 vLineUv; varying vec3 vMetalLine;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvLineUv = uv; vMetalLine = aMetalLine;');
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying vec2 vLineUv; uniform vec3 uLineHeatLo, uLineHeatHi;')
+      .replace('#include <common>', '#include <common>\nvarying vec2 vLineUv; varying vec3 vMetalLine; uniform vec3 uLineHeatLo, uLineHeatHi, uLineEmber;')
       .replace('#include <color_fragment>', `#include <color_fragment>
         float centre = 1.0 - abs(vLineUv.x - 0.5) * 2.0;
-        diffuseColor.rgb *= mix(uLineHeatLo, uLineHeatHi, smoothstep(0.1, 0.85, centre));`);
+        vec3 lit = diffuseColor.rgb * mix(uLineHeatLo, uLineHeatHi, smoothstep(0.1, 0.85, centre));
+        if (vMetalLine.x > 0.0) {
+          float aa = max(fwidth(vLineUv.x), 0.001);
+          float seam = 1.0 - smoothstep(vMetalLine.x - aa, vMetalLine.x + aa, abs(vLineUv.x - 0.5));
+          float tip = vMetalLine.y > 0.0 ? 1.0 - step(vMetalLine.y, vLineUv.y) : 0.0;
+          float ink = max(seam, tip);
+          if (ink < 0.01) discard;
+          vec3 ember = mix(uLineEmber * 0.18, uLineHeatLo * 0.75, vMetalLine.z);
+          ember *= clamp(diffuseColor.r / 0.88, 0.0, 1.0);
+          diffuseColor.rgb = mix(ember * seam, lit, tip);
+        } else diffuseColor.rgb = lit;`);
   };
-  lineMat.customProgramCacheKey = () => 'kiln-hit-lines';
-  const hitLines = inst(new THREE.PlaneGeometry(1, 1), lineMat, CAP * 9, 7);
+  lineMat.customProgramCacheKey = () => 'kiln-hit-lines-metal-seams';
+  // Metal keeps its own fine cut instead of wearing the glass brick's broad light bars.
+  // x = seam half-width in UV, y = readable phone tip height, z = brief hit warmth.
+  const metalLine = new THREE.InstancedBufferAttribute(new Float32Array(CAP * 9 * 3), 3);
+  metalLine.setUsage(THREE.DynamicDrawUsage);
+  const hitGeometry = new THREE.PlaneGeometry(1, 1);
+  hitGeometry.setAttribute('aMetalLine', metalLine);
+  const hitLines = inst(hitGeometry, lineMat, CAP * 9, 7);
   hitLines.name = 'brick-hit-lines';
   const lineLit = new THREE.Color(0xffffff).multiplyScalar(0.88);
   const lineDark = new THREE.Color(0x080a0d);
@@ -316,6 +343,7 @@ export function createMarks(root, M) {
 
   function hitsLeft(i, z, offsetX = 0, width, height, offsetY = 0) {
     const B = world.bricks;
+    const metal = B.type[i] === BRICK.ARMOURED;
     const maxHp = B.hpMax[i] || B.hp[i] || 1;
     hitLineLayout(readability, width || B.w[i], height || B.h[i], maxHp, linePlan);
     // Larger starting counts return to the shared four-channel language once four hits remain.
@@ -328,8 +356,29 @@ export function createMarks(root, M) {
       glyphCell.array[eSlot[k]] = count;
     } else for (let j = 0; j < linePlan.count; j++) {
       hitLinePosition(j, linePlan, linePoint);
-      add(ID.backs, i, offsetX + linePoint.x, offsetY + linePoint.y, z, linePlan.w + linePlan.pad * 2, linePlan.h + linePlan.pad * 2, 1);
-      add(ID.lines, i, offsetX + linePoint.x, offsetY + linePoint.y, z + 0.2, linePlan.w, linePlan.h, 1, 3, j);
+      let lineW = linePlan.w, lineH = linePlan.h, stem = 0, tip = 0;
+      if (metal) {
+        if (readability.small) {
+          // The narrow stem is material detail. Only this full-width 3px tip carries the count.
+          tip = Math.min(lineH, PHONE_MARKS.HIT_STROKE_PX / readability.scale);
+          stem = Math.min(lineW, 0.65 / readability.scale);
+          add(ID.backs, i, offsetX + linePoint.x, offsetY + linePoint.y, z,
+            stem + 0.35 / readability.scale, lineH + linePlan.pad * 2, 1);
+          add(ID.backs, i, offsetX + linePoint.x, offsetY + linePoint.y - (lineH - tip) / 2, z,
+            lineW + linePlan.pad * 2, tip + linePlan.pad * 2, 1);
+        } else {
+          lineW = 0.9;
+          stem = lineW;
+          add(ID.backs, i, offsetX + linePoint.x, offsetY + linePoint.y, z,
+            lineW + 0.8, lineH + 1.2, 1);
+        }
+      } else add(ID.backs, i, offsetX + linePoint.x, offsetY + linePoint.y, z,
+        lineW + linePlan.pad * 2, lineH + linePlan.pad * 2, 1);
+      const k = add(ID.lines, i, offsetX + linePoint.x, offsetY + linePoint.y, z + 0.2, lineW, lineH, 1, 3, j);
+      const slot = eSlot[k] * 3;
+      metalLine.array[slot] = metal ? stem / lineW / 2 : 0;
+      metalLine.array[slot + 1] = metal ? tip / lineH : 0;
+      metalLine.array[slot + 2] = 0;
     }
     // Keep the old displayed HP through a rebuild so a hit can flash every removed line.
     if (lineLastHp[i] < 0) lineLastHp[i] = B.hp[i];
@@ -409,6 +458,7 @@ export function createMarks(root, M) {
       nE = 0;
       counts.fill(0);
       lineValue.fill(-1);
+      metalLine.array.fill(0);
       const zMark = LOOK.MARK_Z;
       const zFront = LOOK.SHELL.d / 2 + 0.15;
       const halfH = 13; // shell half height in the slab frame
@@ -563,6 +613,7 @@ export function createMarks(root, M) {
         hitLines.setColorAt(eSlot[k], lit ? lineLit : lineDark);
       }
       if (hitLines.instanceColor) hitLines.instanceColor.needsUpdate = true;
+      metalLine.needsUpdate = true;
       glyphCell.needsUpdate = true;
       iconCell.needsUpdate = true;
       targetGuard = null;
@@ -618,19 +669,25 @@ export function createMarks(root, M) {
         const i = eBrick[k], slot = eSlot[k], hp = Math.max(0, B.hp[i]);
         const elapsed = t - lineFlashT[i];
         const lost = eAux[k] >= hp && eAux[k] < lineFlashFromHp[i];
-        const flash = lost && elapsed >= 0 && elapsed < LOOK.HIT_FLASH_S ? 1 - elapsed / LOOK.HIT_FLASH_S : 0;
-        const value = eAux[k] < hp ? 1 : flash > 0 ? 1 + flash : 0;
+        const warmth = elapsed >= 0 && elapsed < LOOK.HIT_FLASH_S ? 1 - elapsed / LOOK.HIT_FLASH_S : 0;
+        const flash = lost ? warmth : 0;
+        const metal = B.type[i] === BRICK.ARMOURED;
+        const value = eAux[k] < hp ? (metal ? 1 + warmth : 1) : flash > 0 ? 1 + flash : 0;
         if (lineValue[slot] !== value) {
-          if (value === 1) tmpCol.copy(lineLit);
+          if (eAux[k] < hp) tmpCol.copy(lineLit);
           else if (value === 0) tmpCol.copy(lineDark);
           else tmpCol.copy(lineDark).lerp(lineFlash, flash);
           hitLines.setColorAt(slot, tmpCol);
+          metalLine.array[slot * 3 + 2] = metal ? warmth : 0;
           lineValue[slot] = value;
           lineDirty = true;
         }
         lineLastHp[i] = hp;
       }
-      if (lineDirty && hitLines.instanceColor) hitLines.instanceColor.needsUpdate = true;
+      if (lineDirty && hitLines.instanceColor) {
+        hitLines.instanceColor.needsUpdate = true;
+        metalLine.needsUpdate = true;
+      }
       if (dirty) for (let id = 0; id < meshes.length; id++) meshes[id].instanceMatrix.needsUpdate = true;
     },
   };

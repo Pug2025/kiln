@@ -204,21 +204,31 @@ test('drop reflection follows new kit and restored-context maps without persiste
  const n=f.calls.length;liveBalls(r.w);r.draw();r.actors.setWorld(r.w);assert.equal(f.calls.length,n,'frame and world reset never warm programs');
 });
 
-test('production renderer warm-up reflects drop maps only after both native compile target routes',()=>{
- const r=setup(),f=dropWarmFixture(r),trace=[],target={name:'full-target'},camera={},programs=[];
- let current=null;
- const gl={...f.gl,initTexture(){},setRenderTarget(value){current=value;trace.push(value?'target-full':'target-canvas');},
-  compile(scene,cam){assert.equal(scene,r.scene);assert.equal(cam,camera);const route=current?'full':'lite';trace.push(`compile-${route}`);
-   scene.traverseVisible(o=>assert.ok(o!==r.actors.ballLight,'revealing hidden meshes must not compile the disabled lamp into either output route'));
-   for(const [i,m]of f.materials.entries()){const p=f.program(`${route}${i}`);programs.push(p);const props=gl.properties.get(m);if(!props.programs)props.programs=new Map();props.programs.set(route,p);}
+test('production renderer warm-up prepares one linear variant and reflects drops without drawing',()=>{
+ const r=setup(),f=dropWarmFixture(r),trace=[],target={name:'linear-target'},caller={name:'caller-target'},camera={},programs=[];
+ let current=caller;
+ const gl={...f.gl,initTexture(){},getRenderTarget(){return current;},
+  setRenderTarget(value){current=value;trace.push(value===target?'target-linear':value===caller?'target-caller':'target-canvas');},
+  compile(scene,cam){assert.equal(scene,r.scene);assert.equal(cam,camera);assert.equal(current,target);trace.push('compile-linear');
+   scene.traverseVisible(o=>assert.ok(o!==r.actors.ballLight,'revealing hidden meshes must not compile the disabled lamp'));
+   for(const [i,m]of f.materials.entries()){const p=f.program(`linear${i}`);programs.push(p);const props=gl.properties.get(m);if(!props.programs)props.programs=new Map();props.programs.set('linear',p);}
   }};
- const actors={warmTextures(){trace.push('textures');},warmPrograms(renderer){trace.push('reflect');assert.equal(programs.length,8);r.actors.warmPrograms(renderer);}};
+ const actors={warmTextures(){trace.push('textures');},warmPrograms(renderer){trace.push('reflect');assert.equal(programs.length,4);r.actors.warmPrograms(renderer);}};
  const source=readFileSync(new URL('../src/render/renderer.js',import.meta.url),'utf8');
  const begin=source.indexOf('  function warmUp() {'),end=source.indexOf('  // ---- per-frame helpers',begin);
  assert.ok(begin>=0&&end>begin);
- const warm=new Function('unifyStandardMaterials','scene','M','gl','actors','camera','post',`${source.slice(begin,end)};return warmUp;`)(()=>{},r.scene,r.M,gl,actors,camera,{composer:{renderTarget1:target}});
+ const warm=new Function('unifyStandardMaterials','scene','M','gl','actors','camera','post',`${source.slice(begin,end)};return warmUp;`)(()=>{},r.scene,r.M,gl,actors,camera,{composer:{renderTarget1:target},warmUp(){trace.push('post-warm');assert.equal(current,target);}});
  r.outlines.visible=false;const counts=f.meshes.map(m=>m.count);warm();
- assert.deepEqual(trace,['textures','target-canvas','compile-lite','target-full','compile-full','target-canvas','reflect']);
+ assert.deepEqual(trace,['textures','target-linear','compile-linear','reflect','post-warm','target-caller']);
  assert.ok(programs.every(p=>p.initializations===1));assert.equal(r.outlines.visible,false,'hidden meshes restore after preparation');
- assert.deepEqual(f.meshes.map(m=>m.count),counts);assert.equal(current,null);
+ assert.deepEqual(f.meshes.map(m=>m.count),counts);assert.equal(current,caller);
+ // Compilation failures still restore caller state and hidden pools. The existing boot guard
+ // owns actual readiness; preparing a shader never draws or marks a successful frame.
+ const failure=new Error('compile failed'),previousWarn=console.warn,warnings=[];
+ gl.compile=()=>{throw failure;};console.warn=(...args)=>warnings.push(args);
+ const reflected=f.calls.length;
+ try{warm();}finally{console.warn=previousWarn;}
+ assert.equal(warnings.length,1);assert.equal(warnings[0][1],failure);
+ assert.equal(current,caller);assert.equal(r.outlines.visible,false);
+ assert.deepEqual(f.meshes.map(m=>m.count),counts);assert.equal(f.calls.length,reflected);
 });
