@@ -83,6 +83,7 @@ export function createHud(root, opts = {}) {
     fxOn: new Int8Array(DROP_COUNT).fill(-1), fxQ: new Int16Array(DROP_COUNT).fill(-1),
     fxN: new Int16Array(DROP_COUNT).fill(-1), deltaUntil: 0, deltaOn: false, noteUntil: 0,
     dropUntil: 0, dropSeen: 0, bossLabel: '', bossFact: '', bossAria: '', laserLabel: '', contextOn: null,
+    bossSegs: -1, bossHp: -1, bossId: '', bossStage: -1, bossFlash: false, bossCooled: null,
   };
   const peak = new Float32Array(DROP_COUNT); // longest ms seen per effect, for its line
   let scale = 1;
@@ -105,6 +106,8 @@ export function createHud(root, opts = {}) {
     blocks.heat.classList.remove('drop-fact-on');
     last.bossLabel = ''; last.bossFact = ''; last.bossAria = ''; last.laserLabel = '';
     last.contextOn = null;
+    last.bossSegs = -1; last.bossHp = -1; last.bossId = ''; last.bossStage = -1; last.bossCooled = null;
+    k.boss.classList.remove('hit-a', 'hit-b', 'cooled');
   }
 
   return {
@@ -313,6 +316,19 @@ export function createHud(root, opts = {}) {
       if (bossOn) {
         const q = Math.round((boss.hp / boss.hpMax) * 100);
         const aria = `${lvl.def.name || bossLabel}${coreStage ? `, stage ${coreStage} of 3` : ''}, ${name}`;
+        // One segment per counted hit, so every hit visibly takes one away; the bar flashes warm
+        // on each one (item 20). Two alternating classes restart the CSS flash without a reflow.
+        if (boss.hpMax !== last.bossSegs) { last.bossSegs = boss.hpMax; k.boss.style.setProperty('--segs', String(boss.hpMax)); }
+        if (last.bossHp >= 0 && boss.hp < last.bossHp && last.bossId === boss.id && last.bossStage === coreStage) {
+          last.bossFlash = !last.bossFlash;
+          k.boss.classList.toggle('hit-a', last.bossFlash);
+          k.boss.classList.toggle('hit-b', !last.bossFlash);
+        }
+        last.bossHp = boss.hp;
+        last.bossId = boss.id;
+        last.bossStage = coreStage;
+        const cooled = !!boss.data?.guard && boss.hp > 0;
+        if (cooled !== last.bossCooled) { last.bossCooled = cooled; k.boss.classList.toggle('cooled', cooled); }
         if (q !== last.boss || aria !== last.bossAria) {
           last.boss = q;
           last.bossAria = aria;
@@ -371,7 +387,7 @@ export function createHud(root, opts = {}) {
 function bossFact(world) {
   const boss = world.boss;
   if (boss.hp <= 0) return boss.id === 'core' && boss.phase < 3 ? 'Stage complete' : 'Core broken';
-  if (boss.data?.guard) return 'Core briefly protected';
+  if (boss.data?.guard) return 'Core cooled: no damage';
   if (boss.id !== 'stoker') return boss.id === 'core' && boss.phase === 3
     ? 'Hit core through both gaps' : 'Hit core through the gap';
   if (boss.data?.jawRepairPending) return 'Jaw repairing; damage kept';

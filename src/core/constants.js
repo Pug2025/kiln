@@ -67,12 +67,18 @@ export const BALL = freeze({
   MAX: 12,            // pool size (multiball, Fever, cavity balls)
 });
 
-// Speed tiers 0–5. Tier +1 every 6 paddle contacts and on a perfect hit; resets to the level's
+// Speed tiers 0–5. Tier +1 every 6 paddle contacts (18 in ring mode) and on a perfect hit; resets to the level's
 // base tier on a lost ball. 760 u/s = 6.33 units per step, below one brick height.
 export const SPEED = freeze({
   TIERS: [460, 510, 560, 620, 690, 760], // 2026-10-21 18:45 lead request from the owner's playtest (was 420, 480, 540, 610, 680)
   CAP: 760,
   CONTACTS_PER_TIER: 6,
+  // Ring mode (Oct 27, item 20 review): trips there are short, so a human-like player made 1.0
+  // (level 21) to 1.9 (The Core stage 3) paddle contacts a second against 0.5 to 0.6 on bottom and
+  // left levels, and the ball reached top speed three to four times sooner. At 220 ms of reaction
+  // lag it then ran out of lives on Core stage 3 in 13 of 16 runs. Three times the contacts keeps
+  // the speed-up about as fast in seconds as elsewhere (stage 3: 13 of 16 cleared).
+  RING_CONTACTS_PER_TIER: 18,
 });
 
 // Perfect hit: action within 60 ms of a paddle contact → one tier up for 1.5 s, pierces the
@@ -171,13 +177,22 @@ export const SLOWMO = freeze({
 });
 
 // Anti-loop: nudge the ball 4–7° after 10 bounces with no brick, a repeated 4-bounce pattern,
-// or 12 s away from the paddle.
+// or 12 s away from the paddle. Ring mode has no walls, so a ball sent far off-centre can skate
+// round the rim from paddle to paddle and never meet a brick or the boss (review Oct 27, The Core
+// stage 3 and level 21: up to 1057 paddle contacts in a row). After RING_SKATE_CONTACTS paddle
+// contacts in a row with nothing else touched, the next bounce leaves at most RING_SKATE_DEG from
+// straight in (it passes 83 units from the centre: inside The Core's inner ring and level 21's
+// reactor), then the count starts again. Tried on a human-like player (160 ms, 64 seeds): 2 and
+// 15 beat 1, 3 and 25 on Core stage 3 and level 21; a turn that stayed on until something was
+// touched held a ball on a line that missed the last bricks for good.
 export const ANTILOOP = freeze({
   NUDGE_MIN_DEG: 4,
   NUDGE_MAX_DEG: 7,
   BOUNCES_NO_BRICK: 10,
   PATTERN_LEN: 4,
   AWAY_MS: 12000,
+  RING_SKATE_CONTACTS: 2,
+  RING_SKATE_DEG: 15,
 });
 
 // Last bricks: at ≤3 clearable bricks a faint aim line shows from the paddle, the ball slows 10%,

@@ -5,7 +5,8 @@ import { getLevel, getStage } from '../src/levels/index.js';
 import { CONTENT } from '../src/content/bricks.js';
 import { CRUCIBLE_SPEC, CORE_SPECS } from '../src/content/bosses/orbit.js';
 import { contentWorld } from './fixtures/B/helpers.mjs';
-import { isBossCore, coreProtected, CORE_HIT_FLASH_MS, stokerThroat, orbitApertures, bossTrimKind } from '../src/render/boss-feedback.js';
+import { isBossCore, coreProtected, CORE_HIT_FLASH_MS, stokerThroat, orbitApertures, bossTrimKind, crackPlan, cracksShown, CRACK_SEGS } from '../src/render/boss-feedback.js';
+import { coreRules } from '../src/content/bosses/common.js';
 
 const fights = () => [getLevel(10), getLevel(20), getLevel(30), getStage('core-2'), getStage('core-3')];
 const coreOf = w => [...Array(w.bricks.count).keys()].find(i => isBossCore(w, i));
@@ -37,41 +38,57 @@ test('shipped Crucible vessel lip and body leave the real gate open while both b
   assert.equal(bossTrimKind('core', 'part-shell', 'core'), '', 'heat remains protected if future model topology changes');
 });
 
-test('every boss: counted core hit flashes briefly, cooldown dims and expires without a brick rebuild', () => {
+test('every boss: a counted hit stays hot through the short cooldown; a blocked contact says so without restarting it', () => {
   for (const def of fights()) {
     const t = contentWorld(def), w = t.world, core = coreOf(w);
     assert.ok(core >= 0, `${def.id}: core identified`);
     assert.equal(coreProtected(w), false, 'fresh core is ready');
     t.hit(core);
-    assert.equal(coreProtected(w), false, 'counted impact gets its brief flash');
+    assert.equal(coreProtected(w), false, 'counted impact gets its flash');
     const at = w.boss.data.lastCoreMs;
     w.time = at + CORE_HIT_FLASH_MS;
-    assert.equal(coreProtected(w), true, 'cooldown visibly cold after counted flash');
+    assert.equal(coreProtected(w), false, 'item 20: a counted hit never ends in the cold look of a blocked one');
     t.hit(core);
     assert.equal(w.boss.data.lastCoreMs, at, 'ignored contact does not restart flash/readiness');
     assert.ok(t.events().some(e => e.name === 'BOSS_BLOCKED'));
-    const version = w.bricks.version;
-    w.time = at + CONTENT.CORE_COOLDOWN_MS;
-    assert.equal(coreProtected(w), false, 'warms at exact cooldown expiry');
-    assert.equal(w.bricks.version, version, 'expiry requires no structural update');
+    assert.equal(cracksShown(w.boss), 1, 'one counted hit, one lasting crack; the blocked contact adds none');
   }
 });
 
-test('every boss: guard stays dim after cooldown and warms when content ends the entry', () => {
+test('every boss: a cooled core is dim after its last counted flash, keeps its cracks, and warms when the entry ends', () => {
   for (const def of fights()) {
     const t = contentWorld(def), w = t.world, core = coreOf(w);
+    const { entryHits, cooldownMs } = coreRules(w.boss);
     w.api.spawnBall(w.bricks.x[core], w.bricks.y[core], 0, 0);
-    t.hit(core);
-    w.time += CONTENT.CORE_COOLDOWN_MS;
-    t.hit(core);
+    for (let k = 0; k < entryHits; k++) { t.hit(core); w.time += cooldownMs; }
     assert.equal(w.boss.data.guard, 1);
-    w.time += CONTENT.CORE_COOLDOWN_MS;
-    assert.equal(coreProtected(w), true, `${def.id}: guard outlasts short cooldown`);
+    assert.equal(coreProtected(w), true, `${def.id}: cooled core is visibly cold`);
+    assert.equal(cracksShown(w.boss), entryHits, `${def.id}: damage stays visible while cooled`);
     w.balls[0].alive = false;
     t.step();
     assert.equal(w.boss.data.guard, 0);
     assert.equal(coreProtected(w), false, 'exit restores visibly hot core');
   }
+});
+
+test('core cracks: one per counted hit, inside the core face, the same plan every time', () => {
+  for (const [w, h, n] of [[120, 60, 12], [120, 60, 5], [60, 60, 6], [60, 120, 6]]) {
+    const a = crackPlan(w, h, n, 99), b = crackPlan(w, h, n, 99);
+    assert.deepEqual([...a], [...b], 'deterministic');
+    assert.equal(a.length / 5, n * CRACK_SEGS);
+    const used = new Set();
+    for (let s = 0; s < a.length / 5; s++) {
+      for (const [x, y] of [[a[s * 5], a[s * 5 + 1]], [a[s * 5 + 2], a[s * 5 + 3]]]) {
+        assert.ok(Math.abs(x) <= w / 2 && Math.abs(y) <= h / 2, `segment inside the ${w}x${h} core`);
+      }
+      assert.ok(Math.hypot(a[s * 5 + 2] - a[s * 5], a[s * 5 + 3] - a[s * 5 + 1]) > 2, 'no empty crack segment');
+      used.add(a[s * 5 + 4]);
+    }
+    assert.equal(used.size, n, 'every counted hit has its own crack');
+  }
+  assert.equal(cracksShown({ hp: 12, hpMax: 12 }), 0);
+  assert.equal(cracksShown({ hp: 7, hpMax: 12 }), 5);
+  assert.equal(cracksShown({ hp: 0, hpMax: 12 }), 12);
 });
 
 test('Stoker throat crop follows the actual jaw span through breakage and sway, never crops permanent cheeks', () => {

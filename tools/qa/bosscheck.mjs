@@ -74,10 +74,15 @@ try {
         return { id:w.boss.id, stage:w.level.def.stage||1, hp:w.boss.hp, max:w.boss.hpMax, guard:w.boss.data.guard,
           jaw:Q.jaw().filter(i=>w.bricks.alive[i]).map(i=>({x:w.bricks.x[i],hp:w.bricks.hp[i]})),
           texts, layout:k.hudCheck(), coreHeat:k.renderer._internals.M.bossCore.userData.u.uHeatValue.value,
+          cracks:k.renderer._internals.scene.getObjectByName('boss-core-cracks')?.count ?? -1,
+          segs:document.querySelector('[data-k="boss"]')?.style.getPropertyValue('--segs'),
           field:(()=>{const r={};k.renderer.fieldRect(r);return r})() };
       })()`);
       assert.equal(state.layout.overlaps.length, 0, `${device}/${name}: HUD buttons overlap text`);
       if(name.endsWith('guarded')) assert.ok(state.coreHeat < 0.1, `${device}/${name}: protected model core must dim`);
+      // item 20: every counted hit is a lasting crack (3 segments each) and one bar segment
+      if(state.hp > 0) assert.equal(state.cracks, (state.max - state.hp) * 3, `${device}/${name}: one drawn crack per counted hit`);
+      if(state.hp > 0) assert.equal(state.segs, String(state.max), `${device}/${name}: one bar segment per core hit`);
       const shot = join(out, `${device}-${name}.png`);
       writeFileSync(shot, await page.screenshot());
       report.results.push({ device, name, ...state, shot });
@@ -87,7 +92,9 @@ try {
       await page.eval(`(() => {
         const w=window.__kiln.world,Q=window.bossQA,i=Q.core();
         const b=w.balls[0];Object.assign(b,{alive:true,held:false,x:w.boss.x+45,y:w.boss.y,px:w.boss.x+45,py:w.boss.y,vx:0,vy:0});
-        Q.skip(600); Q.hit(i); Q.skip(600); Q.hit(i);
+        // count hits until the core cools (2 for The Stoker, 3 for the rotating bosses)
+        let n=0; while(!w.boss.data.guard && n++<6){Q.skip(600);Q.hit(i);}
+        Q.skip(300);
         const hp=w.boss.hp;Q.hit(i);if(w.boss.hp!==hp || !w.boss.data.guard)throw Error('guard failed: '+JSON.stringify({hpBefore:hp,hp:w.boss.hp,data:w.boss.data,time:w.time,phase:w.phase}));
         Q.skip(160);
         Q.render();

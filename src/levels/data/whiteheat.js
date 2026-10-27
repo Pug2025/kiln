@@ -454,8 +454,9 @@ const LEVELS = [
     rules: {},
   },
   {
-    // The Core, stage 3 (ring field): two counter-rotating rings; their gaps line up every few
-    // seconds. The heart fires bolts at the paddle. Every space between core, rings and wall is
+    // The Core, stage 3 (ring field): two counter-rotating rings; their gaps meet at the bottom
+    // and top (equal and opposite speeds, bosses/orbit.js; before Oct 27 the meeting point
+    // wandered). The heart fires bolts at the paddle. Every space between core, rings and wall is
     // wider than the ball (a ball wedged in a narrow annulus rattles there forever).
     n: 30,
     id: 'core-3',
@@ -466,7 +467,7 @@ const LEVELS = [
     mode: 'ring',
     tier: 2,
     stage: 3,
-    hint: 'The two rings turn opposite ways. Aligned gaps expose the core.',
+    hint: 'The rings turn opposite ways. Their gaps meet at the bottom and top.',
     rows: ringRows((dx, dy, d, a) => {
       if (d < 30) return 'W';
       const bottom = near(a, Math.PI / 2, 0.45);

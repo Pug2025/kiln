@@ -31,13 +31,20 @@ class SilentContext {
   resume() { return Promise.resolve(); }
 }
 
-test('blocked boss contact is a short low knock, distinct from the counted core hit', () => {
+test('three boss contact sounds: counted core hit rings and climbs with damage, blocked is a low knock, armour a light tick', () => {
   const ctx = new SilentContext(), sfx = createSfx(ctx, ctx.createGain(), ctx.createGain());
   sfx.bossBlocked(1, 360);
   assert.deepEqual(ctx.pitches, [135], 'blocked contact has one low, dry oscillator');
   ctx.pitches.length = 0;
-  sfx.clank(1, true, 360);
-  assert.ok(ctx.pitches.some(p => p > 1000), 'counted hit retains the ringing metal harmonics');
+  sfx.coreHit(1, 360, 0);
+  const fresh = [...ctx.pitches];
+  assert.ok(fresh.some(p => p > 1000), 'counted hit retains the ringing metal harmonics');
+  ctx.pitches.length = 0;
+  sfx.coreHit(1, 360, 1);
+  assert.ok(Math.max(...ctx.pitches) > Math.max(...fresh) * 1.3, 'the ring climbs as the core breaks');
+  ctx.pitches.length = 0;
+  sfx.armourTick(1, 360);
+  assert.ok(ctx.pitches.length === 1 && ctx.pitches[0] > 1000, 'armour: one short high tick, unlike the low knock or the ringing hit');
 });
 
 test('boss audio reader only plays success for BOSS_HIT; blocked contact and readiness are separate', () => {
@@ -69,7 +76,7 @@ test('boss audio reader only plays success for BOSS_HIT; blocked contact and rea
     const head = [...Array(w.bricks.count).keys()].find(i => w.bricks.type[i] === BRICK.BOSS);
     emit(w.bus, EV.BRICK_HIT, head, 360, 450);
     a.frame(w, 0.016);
-    assert.equal(a.state.last, 'bossBlocked', 'permanent armour has the same honest deflection sound');
+    assert.equal(a.state.last, 'armour', 'item 20: permanent armour has its own light metal tick, not the blocked knock');
     assert.equal(a.state.played, played + 1);
     assert.equal(a.state.silent, true);
   } finally {

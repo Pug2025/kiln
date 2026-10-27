@@ -193,6 +193,15 @@ export function createFx(scene, M) {
       this.burst(x, y, 8, 4, 0.7, 55, 5, 0.28, 0.55, 1);
     },
 
+    /**
+     * Permanent boss armour: a pale, very short metal tick, mostly neutral so warm stays the colour
+     * of damage (review Oct 27: warm armour sparks read as a smaller damage burst). Not the core's
+     * slow grey puff either: smaller, quicker and lighter.
+     */
+    armour(x, y) {
+      this.burst(x, y, 8, 4, 0.8, 150, 3.5, 0.16, 1, 0.75);
+    },
+
     setScale(s) {
       burstMat.uniforms.uScale.value = s;
     },

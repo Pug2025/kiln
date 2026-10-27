@@ -39,7 +39,7 @@ export const EV = Object.freeze({
   CATCH: 38,          // id = ball held by the Catch effect; x, y
   RELEASE: 39,        // id = ball released from a catch; x, y; a = vx, b = vy
   SPEED_TIER: 40,     // id = ball; a = new tier
-  NUDGE: 41,          // id = ball; a = degrees applied; b = reason (0 bounces, 1 pattern, 2 away, 3 portal trips)
+  NUDGE: 41,          // id = ball; a = degrees applied; b = reason (0 bounces, 1 pattern, 2 away, 3 portal trips, 4 ring skate)
   NEAR_MISS: 42,      // id = ball; x, y; a = distance to the last brick
   LAST_BRICK: 43,     // x, y = last brick centre (slow-mo and zoom begin)
   PORTAL: 44,         // id = ball; x, y = exit; a = entry brick; b = exit brick

@@ -17,7 +17,7 @@ export const PLATE = 30;
  * @param {import('../../core/types.js').World} world
  * @param {object} ctx  content helpers (allocBrick)
  * @param {number[]} reuse  brick indices free to become plates
- * @param {{cx:number, cy:number, r:number, slots:number, gaps:number[], group:number, omega:number}} o
+ * @param {{cx:number, cy:number, r:number, slots:number, gaps:number[], group:number, omega:number, theta0?:number}} o
  * @returns {{ids:Int16Array, base:Float32Array, cx:number, cy:number, r:number, theta:number, omega:number, group:number}}
  */
 export function buildRing(world, ctx, reuse, o) {
@@ -49,7 +49,7 @@ export function buildRing(world, ctx, reuse, o) {
     cx: o.cx,
     cy: o.cy,
     r: o.r,
-    theta: 0,
+    theta: o.theta0 || 0, // a starting turn (the model part turns with it, so its cuts stay true)
     omega: o.omega,
     group: o.group,
   };
@@ -131,20 +131,31 @@ export function centreOf(world, ids) {
   return { x: x / Math.max(1, ids.length), y: y / Math.max(1, ids.length) };
 }
 
+/** The core rules a boss was reset with (cooldown, counted hits per entry, guard time). */
+export function coreRules(boss) {
+  return boss?.data?.rules || DEFAULT_RULES;
+}
+
+const DEFAULT_RULES = Object.freeze({
+  cooldownMs: CONTENT.CORE_COOLDOWN_MS, entryHits: CONTENT.ENTRY_HITS, guardMs: CONTENT.GUARD_MS,
+});
+
 /**
  * A weak point took a hit: cooldown, the per-entry cap, hp, BOSS_HIT, remaining. Returns true if
- * it counted. After CONTENT.ENTRY_HITS counted hits the core cools (boss.data.guard = 1,
- * BOSS_GUARD a = 1) and ignores hits until every ball has left the boss or CONTENT.GUARD_MS has
- * passed (endEntry): a trip inside scores two hits, then two more at most every 2.5 s, never a
- * rattle that takes the whole bar. A contact that does not count emits BOSS_BLOCKED.
+ * it counted. After rules.entryHits counted hits the core cools (boss.data.guard = 1,
+ * BOSS_GUARD a = 1) and ignores hits until every ball has left the boss or rules.guardMs has
+ * passed (endEntry): a trip inside scores a few hits, then a few more at most every guardMs,
+ * never a rattle that takes the whole bar. A contact that does not count emits BOSS_BLOCKED.
+ * Rules default to CONTENT (The Stoker); the rotating bosses pass their own (orbit.js).
  * @param {import('../../core/types.js').World} world
  */
 export function hitCore(world, ctx, i) {
   const boss = world.boss;
   const d = boss.data;
   const B = world.bricks;
+  const rules = coreRules(boss);
   if (boss.hp <= 0) return false;
-  if (d.guard || world.time - d.lastCoreMs < CONTENT.CORE_COOLDOWN_MS) {
+  if (d.guard || world.time - d.lastCoreMs < rules.cooldownMs) {
     // a contact that does not count says so (C draws a dull puff, E a dull knock), so a cooled
     // core never looks like a normal hit with a bar that does not move
     emit(world.bus, EV.BOSS_BLOCKED, i, B.x[i], B.y[i], d.guard ? 1 : 0);
@@ -155,7 +166,7 @@ export function hitCore(world, ctx, i) {
   B.hitMs[i] = world.time;
   B.version++;
   emit(world.bus, EV.BOSS_HIT, i, B.x[i], B.y[i], boss.hp, boss.hpMax);
-  if (++d.entryHits >= CONTENT.ENTRY_HITS && boss.hp > 0) {
+  if (++d.entryHits >= rules.entryHits && boss.hp > 0) {
     d.guard = 1;
     d.guardId = i;
     d.guardAt = world.time;
@@ -168,11 +179,11 @@ export function hitCore(world, ctx, i) {
 /**
  * Call every step with whether any ball is inside the boss (the head, the outer ring). Once none
  * is, the entry is over: the count restarts and a cooled core takes hits again (BOSS_GUARD a = 0).
- * A core cooled for CONTENT.GUARD_MS warms again with a ball still inside (a new count of two).
+ * A core cooled for rules.guardMs warms again with a ball still inside (a new count).
  */
 export function endEntry(world, anyInside) {
   const d = world.boss.data;
-  if (anyInside && !(d.guard && world.time - d.guardAt >= CONTENT.GUARD_MS)) return;
+  if (anyInside && !(d.guard && world.time - d.guardAt >= coreRules(world.boss).guardMs)) return;
   d.entryHits = 0;
   if (d.guard) {
     d.guard = 0;
@@ -226,8 +237,8 @@ export function stepCascade(world, ctx) {
   }
 }
 
-/** Fill world.boss for a fresh fight. */
-export function resetBoss(world, id, hp, x, y) {
+/** Fill world.boss for a fresh fight. `rules` overrides the CONTENT core rules for this boss. */
+export function resetBoss(world, id, hp, x, y, rules = DEFAULT_RULES) {
   const b = world.boss;
   b.active = true;
   b.id = id;
@@ -239,7 +250,7 @@ export function resetBoss(world, id, hp, x, y) {
   b.open = 0;
   b.state = 0;
   b.t = 0;
-  b.data = { lastCoreMs: -1e9, dying: false, dieStart: 0, dieMs: 0, attackAcc: 0, phaseAt: 0, entryHits: 0, guard: 0, guardId: -1, guardAt: 0 };
+  b.data = { lastCoreMs: -1e9, dying: false, dieStart: 0, dieMs: 0, attackAcc: 0, phaseAt: 0, entryHits: 0, guard: 0, guardId: -1, guardAt: 0, rules };
 }
 
 /** Aim a hazard from (x, y) at the paddle with speed s; rotate by `spread` radians. */

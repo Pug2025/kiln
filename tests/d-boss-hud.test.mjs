@@ -51,7 +51,8 @@ test('boss HUD: persistent jaw route, permanent core progress, one repair, and g
     w.boss.data.guard = 1;
     hud.update(w, 60004);
     hud.update(w, 62503);
-    assert.match(key('bossFact').textContent, /Core.*protected/, 'guard fact remains for the entire real guard state');
+    assert.match(key('bossFact').textContent, /Core cooled.*no damage/, 'guard fact remains for the entire real guard state');
+    assert.ok(key('boss').classList.contains('cooled'), 'the health bar dims while the core takes no damage');
     w.boss.data.guard = 0;
     hud.update(w, 62504);
     assert.match(key('bossFact').textContent, /Jaw open.*core/);
@@ -66,11 +67,26 @@ test('boss HUD: persistent jaw route, permanent core progress, one repair, and g
 });
 
 test('boss HUD: rotating armour is a gap objective, and each Core health bar identifies its stage', () => {
-  const { dom, hud, key } = build(contentWorld(getLevel(20)).world);
+  const t20 = contentWorld(getLevel(20));
+  const { dom, hud, key } = build(t20.world);
   try {
     assert.equal(key('levelLabel').textContent, 'Crucible');
-    assert.equal(key('name').textContent, '20 core hits left');
+    assert.equal(key('name').textContent, '12 core hits left');
     assert.match(key('bossFact').textContent, /core.*gap/);
+    // item 20: one bar segment per counted hit, and every counted hit flashes the bar
+    assert.equal(key('boss').style.getPropertyValue('--segs'), '12');
+    const core = [...Array(t20.world.bricks.count).keys()].find((i) => t20.world.bricks.alive[i] && t20.world.bricks.type[i] === BRICK.WEAK);
+    const flashes = [];
+    for (let n = 0; n < 3; n++) {
+      t20.step(40);
+      t20.hit(core);
+      hud.update(t20.world, 100 + n);
+      flashes.push(key('boss').classList.contains('hit-a') ? 'a' : key('boss').classList.contains('hit-b') ? 'b' : '-');
+    }
+    assert.deepEqual(flashes, ['a', 'b', 'a'], 'each counted hit restarts the bar flash');
+    assert.equal(key('name').textContent, '9 core hits left');
+    hud.update(t20.world, 200);
+    assert.equal(key('boss').classList.contains('hit-b'), false, 'no new flash without a new hit');
     for (let stage = 1; stage <= 3; stage++) {
       const w = contentWorld(stagesOf(getLevel(30))[stage - 1]).world;
       // No reset: a new stage must replace its progress even when a caller reuses the HUD.

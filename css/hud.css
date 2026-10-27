@@ -120,7 +120,18 @@ html.rm .hud .hi, html.rm .hud .hud-btns .icon-btn { scale: none; }
 .hud .boss { margin: 10px 0 0 60px; }
 .hud .boss[hidden] { display: none; }
 .hud .boss .track { position: relative; display: block; height: 1px; background: var(--sep); }
-.hud .boss .fill { position: absolute; right: 0; top: -1px; width: 100%; height: 3px; border-radius: 2px; background: var(--w70); transform-origin: 100% 50%; transition: transform 300ms var(--ease); }
+.hud .boss .fill { position: absolute; right: 0; top: -1px; width: 100%; height: 3px; border-radius: 2px; background: var(--w70); transform-origin: 100% 50%; transition: transform 300ms var(--ease), background-color 300ms var(--ease); }
+/* Item 20: one segment per counted core hit (fixed cuts the fill shrinks past), a short warm flash
+   on every counted hit, and a dimmer bar while the core is cooled and takes no damage. */
+.hud .boss .track::after {
+  content: ''; position: absolute; left: 0; right: 0; top: -2px; height: 5px; pointer-events: none;
+  background: repeating-linear-gradient(to left, transparent 0 calc(100% / var(--segs, 1) - 2px), rgba(6, 7, 9, .92) calc(100% / var(--segs, 1) - 2px) calc(100% / var(--segs, 1)));
+}
+.hud .boss.hit-a .fill { animation: boss-hit-a 420ms var(--ease); }
+.hud .boss.hit-b .fill { animation: boss-hit-b 420ms var(--ease); }
+@keyframes boss-hit-a { 0%, 30% { background-color: var(--heat-hi); } 100% { background-color: var(--w70); } }
+@keyframes boss-hit-b { 0%, 30% { background-color: var(--heat-hi); } 100% { background-color: var(--w70); } }
+.hud .boss.cooled .fill { background-color: rgba(242, 244, 247, .3); }
 .hud .lives, .hud .time { margin-top: 18px; }
 .hud .lives[hidden], .hud .time[hidden] { display: none; }
 .hud .marks { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }

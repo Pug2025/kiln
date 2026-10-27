@@ -1,6 +1,6 @@
 // A: the paddle. Bounce rule, 1:1 steering, perfect hits, speed tiers, spin, catch.
 import { test, assert, near } from './lib.mjs';
-import { SPEED, PERFECT, ANGLE, SIM, PADDLE, FIELD, PHYS } from '../src/core/constants.js';
+import { SPEED, PERFECT, ANGLE, SIM, PADDLE, FIELD, PHYS, RING } from '../src/core/constants.js';
 import { EV } from '../src/core/events.js';
 import { bounceDir, VEL_REF } from '../src/sim/paddle.js';
 import { steerPaddle, M_BOTTOM, M_LEFT, M_RING } from '../src/sim/field.js';
@@ -160,6 +160,28 @@ test('speed tier rises every 6 paddle contacts and resets on serve', () => {
   world.api.serve();
   assert.equal(world.balls[0].tier, 0, 'serve resets to the level tier');
   assert.equal(world.phase, 'serve');
+});
+
+test('ring mode: the speed tier rises every 18 paddle contacts (its trips are about a third as long)', () => {
+  const { world, frame } = physicsWorld({ mode: 'ring' });
+  frame.steer = true;
+  frame.tx = RING.CX;
+  frame.ty = RING.CY + 300; // the arc at the bottom
+  steps(world, frame, 1);
+  const rec = recorder(world);
+  const tiers = [];
+  for (let k = 0; k < SPEED.RING_CONTACTS_PER_TIER + 1; k++) {
+    launchAt(world, RING.CX, RING.CY + 200, 0, SPEED.TIERS[0]);
+    for (let i = 0; i < 60; i++) {
+      steps(world, frame, 1);
+      if (rec().some((e) => e.type === EV.PADDLE_HIT)) { tiers.push(world.balls[0].tier); break; }
+    }
+  }
+  assert.equal(SPEED.RING_CONTACTS_PER_TIER, 3 * SPEED.CONTACTS_PER_TIER);
+  assert.equal(tiers.length, SPEED.RING_CONTACTS_PER_TIER + 1, 'every launch met the arc');
+  assert.equal(tiers[SPEED.CONTACTS_PER_TIER - 1], 0, 'not after 6');
+  assert.equal(tiers[SPEED.RING_CONTACTS_PER_TIER - 2], 0, 'not after 17');
+  assert.equal(tiers[SPEED.RING_CONTACTS_PER_TIER - 1], 1, 'one tier up after 18');
 });
 
 test('spin from paddle motion bends the flight and fades within a second', () => {

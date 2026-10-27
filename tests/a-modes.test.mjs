@@ -346,6 +346,112 @@ test('anti-loop: paddle -> portal -> ... -> paddle with nothing broken is nudged
   assert.equal(n3, 0, 'a breakable hit between trips resets the count');
 });
 
+/**
+ * Ring mode: a hand that trails the ball by `trail` degrees, so every contact lands far out on the
+ * paddle's leading half and sends the ball on round the rim (review Oct 27: The Core stage 3 and
+ * level 21 skated like this for minutes with no brick or boss touched and no nudge). Answers the
+ * events of `seconds` of play and, for each paddle contact, the closest the ball came to the centre
+ * before the next one.
+ */
+function ringSkate({ bricks = [], seconds = 16, trail = 17 } = {}) {
+  const DEG = Math.PI / 180;
+  const { world, frame } = physicsWorld({ mode: 'ring', bricks });
+  const a0 = 90 * DEG;
+  frame.steer = true;
+  frame.tx = RING.CX + Math.cos(a0 - trail * DEG) * 300;
+  frame.ty = RING.CY + Math.sin(a0 - trail * DEG) * 300;
+  steps(world, frame, 1);
+  // outward along bearing 90 degrees, leaning the way the hand trails
+  const b = launchAt(world, RING.CX + Math.cos(a0) * 280, RING.CY + Math.sin(a0) * 280, -300, 480);
+  const rec = recorder(world);
+  const ev = [], closest = [];
+  let near = Infinity, prevBear = Math.atan2(b.y - RING.CY, b.x - RING.CX), dir = 1;
+  for (let i = 0; i < Math.round(seconds * 1000 / SIM.DT_MS); i++) {
+    const bear = Math.atan2(b.y - RING.CY, b.x - RING.CX);
+    const d = Math.atan2(Math.sin(bear - prevBear), Math.cos(bear - prevBear));
+    if (Math.abs(d) > 1e-6) dir = d > 0 ? 1 : -1;
+    prevBear = bear;
+    const p = bear - dir * trail * DEG;
+    frame.tx = RING.CX + Math.cos(p) * 300;
+    frame.ty = RING.CY + Math.sin(p) * 300;
+    steps(world, frame, 1);
+    near = Math.min(near, Math.hypot(b.x - RING.CX, b.y - RING.CY));
+    for (const e of rec()) {
+      ev.push({ ...e, vx: b.vx, vy: b.vy, bx: b.x, by: b.y });
+      if (e.type === EV.PADDLE_HIT) { closest.push(near); near = Infinity; }
+    }
+    if (!b.alive) break;
+  }
+  return { ev, closest, world };
+}
+
+test('anti-loop, ring mode: a ball skating round the rim is turned in on its third paddle contact in a row', () => {
+  const DEG = Math.PI / 180;
+  const { ev, closest, world } = ringSkate();
+  const pads = ev.filter((e) => e.type === EV.PADDLE_HIT);
+  assert.ok(pads.length >= 12, `kept in play: ${pads.length} paddle contacts`);
+  assert.ok(!ev.some((e) => e.type === EV.BALL_LOST), 'never lost');
+  // the first two contacts send it on round the rim, far from the centre
+  assert.ok(closest[1] > 200 && closest[2] > 200, `skating: ${closest.slice(1, 3).map((c) => c.toFixed(0))} from the centre`);
+  const turns = ev.filter((e) => e.type === EV.NUDGE);
+  assert.ok(turns.length >= 3, `turned ${turns.length} times`);
+  assert.ok(turns.every((e) => e.b === 4), 'by the ring skate rule');
+  assert.equal(world.stats.nudges, turns.length);
+  // every turn comes on the third paddle contact in a row: after the launch or the last turn, two
+  // contacts go where the player sent them (NUDGE comes just before its own PADDLE_HIT)
+  let since = 0;
+  for (const e of ev) {
+    if (e.type === EV.PADDLE_HIT) since++;
+    if (e.type === EV.NUDGE) {
+      assert.equal(since, ANTILOOP.RING_SKATE_CONTACTS, 'on the contact after RING_SKATE_CONTACTS in a row');
+      since = -1;
+      // and it leaves at most RING_SKATE_DEG from straight in
+      const nx = RING.CX - e.bx, ny = RING.CY - e.by, l = Math.hypot(nx, ny), s = Math.hypot(e.vx, e.vy);
+      const off = Math.acos((nx * e.vx + ny * e.vy) / (l * s)) / DEG;
+      assert.ok(off <= ANTILOOP.RING_SKATE_DEG + 0.5, `left ${off.toFixed(1)} degrees from straight in`);
+      assert.ok(Math.abs(e.a) > 10, `a real turn (${e.a.toFixed(1)} degrees)`);
+    }
+  }
+  // a turned ball crosses the middle of the field: inside The Core's inner ring (r 95). The trip
+  // after the turned contact (index k, counted before its own PADDLE_HIT) ends at contact k + 1.
+  let k = 0, checked = 0;
+  for (const e of ev) {
+    if (e.type === EV.PADDLE_HIT) k++;
+    if (e.type === EV.NUDGE && closest[k + 1] !== undefined) {
+      assert.ok(closest[k + 1] < 95, `after a turn it passed ${closest[k + 1].toFixed(0)} from the centre`);
+      checked++;
+    }
+  }
+  assert.ok(checked >= 2, `checked ${checked} turned trips`);
+});
+
+test('anti-loop, ring mode: a brick touched between paddle contacts starts the count again', () => {
+  // a ring of bricks at r 215 (they never break: physics only) across most of the skating
+  // ball's ways round; the widest shots still pass outside it
+  const bricks = [];
+  for (let k = 0; k < 32; k++) {
+    const a = (k / 32) * 2 * Math.PI;
+    bricks.push({ x: RING.CX + Math.cos(a) * 215, y: RING.CY + Math.sin(a) * 215, w: 36, h: 36 });
+  }
+  const { ev } = ringSkate({ bricks });
+  const pads = ev.filter((e) => e.type === EV.PADDLE_HIT).length;
+  assert.ok(pads >= 20, `played (${pads} paddle contacts)`);
+  assert.ok(ev.filter((e) => e.type === EV.BRICK_HIT).length >= 10, 'touched the bricks');
+  // a turn only ever follows RING_SKATE_CONTACTS paddle contacts with no brick between them
+  let run = 0, turns = 0;
+  for (const e of ev) {
+    if (e.type === EV.BRICK_HIT) run = 0;
+    else if (e.type === EV.PADDLE_HIT) run++;
+    else if (e.type === EV.NUDGE) {
+      turns++;
+      assert.equal(e.b, 4);
+      assert.equal(run, ANTILOOP.RING_SKATE_CONTACTS, 'a turn needs that many paddle contacts in a row');
+      run = -1;
+    }
+  }
+  assert.ok(turns < pads / 4, `rare with bricks in the way (${turns} turns in ${pads} contacts)`);
+});
+
 test('anti-loop: 12 s away from the paddle without breaking anything', () => {
   const { world, frame } = physicsWorld();
   world.level.remaining = 1;

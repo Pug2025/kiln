@@ -34,7 +34,7 @@ import { createPieces } from './pieces.js';
 import { createOverlays } from './overlays.js';
 import { createTrail } from './trail.js';
 import { createBoss } from './boss.js';
-import { isBossCore, isBossDeflector } from './boss-feedback.js';
+import { bossContactKind } from './boss-feedback.js';
 import { createHeadroom } from './headroom.js';
 import { createFx } from './fx.js';
 import { createReadability, updateReadability } from '../core/readability.js';
@@ -237,11 +237,16 @@ export async function createRenderer(host, opts = {}) {
     while (next(reader)) {
       const r = reader;
       switch (r.type) {
-        case EV.BRICK_HIT:
-          // Core contact alone may be ignored. Its actual outcome owns all feedback below.
-          if (isBossDeflector(world, r.id)) fx.blocked(r.x - HW, HH - r.y);
-          else if (!isBossCore(world, r.id)) fx.burst(r.x - HW, HH - r.y, 10, 6, 1, 200, 6);
+        case EV.BRICK_HIT: {
+          // Core contact alone may be ignored: its BOSS_HIT / BOSS_BLOCKED outcome owns the
+          // feedback below. Permanent boss armour answers with a pale metal tick and its light
+          // sound, never the core's grey puff and never warmth, which belongs to damage (item 20:
+          // three different outcomes).
+          const kind = bossContactKind(world, r.id);
+          if (kind === 'armour') fx.armour(r.x - HW, HH - r.y);
+          else if (kind !== 'core') fx.burst(r.x - HW, HH - r.y, 10, 6, 1, 200, 6);
           break;
+        }
         case EV.BRICK_DAMAGED:
           bricks.hit(r.id, t);
           break;
@@ -312,6 +317,7 @@ export async function createRenderer(host, opts = {}) {
           break;
         case EV.BOSS_BLOCKED:
           fx.blocked(r.x - HW, HH - r.y);
+          bricks.coreBlocked(t, !!r.a);
           break;
         case EV.BOSS_GUARD:
           bricks.coreGuard(r.id, !!r.a);

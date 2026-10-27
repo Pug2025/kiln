@@ -313,6 +313,7 @@ export function ballSrc(ctx) {
 function noteDeadBounce(ctx, bi, surface) {
   const b = ctx.world.balls[bi];
   b.bouncesNoBrick++;
+  ctx.rimRun[bi] = 0; // it touched something besides the paddle: not a rim skate (physics.js)
   pushSigQ(ctx, bi, surface, Math.floor(b.x / 10), Math.floor(b.y / 10));
 }
 
@@ -352,6 +353,7 @@ function noteProgress(ctx, bi) {
   b.bouncesNoBrick = 0;
   ctx.sigN[bi] = 0;
   ctx.portalTrips[bi] = 0;
+  ctx.rimRun[bi] = 0;
   ctx.progressMs[bi] = ctx.world.time;
 }
 

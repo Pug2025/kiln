@@ -33,6 +33,12 @@ export class Group {
   traverse(fn) { fn(this); for (const child of this.children) child.traverse(fn); }
   getObjectByName(name) { return this.name === name ? this : this.children.map(v => v.getObjectByName?.(name)).find(Boolean); }
 }
+export class Mesh extends Group {
+  constructor(geometry, material) {
+    super(); this.geometry = geometry; this.material = material;
+    this.position = new Vector3(); this.scale = new Vector3(1, 1, 1);
+  }
+}
 export class PlaneGeometry {
   constructor(...args) { this.args = args; this.attributes = {}; }
   setAttribute(name, value) { this.attributes[name] = value; }

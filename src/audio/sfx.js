@@ -357,6 +357,26 @@ export function createSfx(ctx, dry, wet) {
       if (heavy) osc('sine', 90, 45, t, 0.2, voiceOut(t, 0.5, 0.003, 0.18, 0, 0));
     },
 
+    /**
+     * A counted core hit: the heavy ringing clank plus a short bright crack. Its ring climbs with
+     * the damage done (frac 0..1), so progress is heard as well as seen.
+     */
+    coreHit(t, x, frac = 0) {
+      const pan = panFor(x);
+      const up = 1 + 0.45 * Math.max(0, Math.min(1, frac));
+      const fs = [180 * up, 471 * up, 1023 * up];
+      for (let i = 0; i < 3; i++) osc('sine', fs[i], fs[i] * 0.985, t, 0.5, voiceOut(t, 0.14, 0.001, 0.45, pan, 0.25));
+      noise(white, 'highpass', 2600, 0, 0.8, t, 0.05, voiceOut(t, 0.13, 0.001, 0.045, pan, 0.1));
+      osc('sine', 90, 45, t, 0.2, voiceOut(t, 0.5, 0.003, 0.18, 0, 0));
+    },
+
+    /** Permanent boss armour deflects: a quick, light metal tick (no ring, no low knock). */
+    armourTick(t, x) {
+      const pan = panFor(x);
+      osc('triangle', 1650, 1500, t, 0.05, voiceOut(t, 0.05, 0.001, 0.045, pan, 0.05));
+      noise(white, 'bandpass', 5200, 0, 3, t, 0.02, voiceOut(t, 0.05, 0.001, 0.018, pan, 0));
+    },
+
     /** A protected core deflects: short, low and dry, without the counted hit's ringing tail. */
     bossBlocked(t, x) {
       const pan = panFor(x);

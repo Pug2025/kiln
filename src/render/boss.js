@@ -11,7 +11,14 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { FIELD } from '../core/constants.js';
 import { PAL, coreMaterial } from './materials.js';
-import { coreProtected, CORE_COOL_HEAT, stokerThroat, orbitApertures, bossTrimKind } from './boss-feedback.js';
+import { coreProtected, coreDamageFraction, CORE_COOL_HEAT, stokerThroat, orbitApertures, bossTrimKind } from './boss-feedback.js';
+
+/**
+ * The heart loses this share of its heat as the core breaks (0 at full health, all of it at the
+ * last hit): a lasting change that reads at any size, where The Core's last-stage cracks are only
+ * a few pixels on a desktop (review Oct 27). Well above the cooled look (CORE_COOL_HEAT).
+ */
+const SPENT_HEAT = 0.3;
 
 const HW = FIELD.W / 2;
 const HH = FIELD.H / 2;
@@ -239,7 +246,8 @@ export function createBoss(scene, M) {
       // molten, only the very centre whitening: a big white-hot sphere outshone the ball (ART 8:
       // the ball is always the brightest thing); The Core's heart is the largest, so the coolest
       const big = B.id === 'core', cold = coreProtected(world);
-      hotCore.userData.u.uHeatValue.value = cold ? CORE_COOL_HEAT : (big ? 0.9 : 0.98) + 0.08 * Math.sin(t * 2.2) + (big ? 0.12 : 0.15) * fire;
+      const spent = 1 - SPENT_HEAT * coreDamageFraction(world);
+      hotCore.userData.u.uHeatValue.value = cold ? CORE_COOL_HEAT : ((big ? 0.9 : 0.98) + 0.08 * Math.sin(t * 2.2)) * spent + (big ? 0.12 : 0.15) * fire;
       emberMat.emissiveIntensity = cold ? 0.025 : 0.22 + 0.04 * Math.sin(t * 2.2) + 0.1 * fire + 0.08 * open;
       if (current.userData.parts) {
         driveModel(current.userData.parts, B, ang);

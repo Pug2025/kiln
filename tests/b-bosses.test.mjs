@@ -5,7 +5,8 @@ import { BF, SRC, HAZARD, PADDLE, RING, HORIZONTAL, PHYS } from '../src/core/con
 import { getLevel, getStage, stagesOf } from '../src/levels/index.js';
 import { BOSS_PARTS } from '../src/content/bosses.js';
 import { STOKER, STOKER_PARTS } from '../src/content/bosses/stoker.js';
-import { CRUCIBLE_PARTS, CORE_PARTS, CRUCIBLE_SPEC, CORE_SPECS } from '../src/content/bosses/orbit.js';
+import { CRUCIBLE_PARTS, CORE_PARTS, CRUCIBLE_SPEC, CORE_SPECS, ORBIT_RULES } from '../src/content/bosses/orbit.js';
+import { coreRules } from '../src/content/bosses/common.js';
 import { CONTENT } from '../src/content/bricks.js';
 import { EV } from '../src/core/events.js';
 import { createReader, next } from '../src/core/bus.js';
@@ -273,49 +274,82 @@ function insidePoint(w, id) {
   return { x: B.x[c], y: B.y[c] + B.h[c] / 2 + 25 };
 }
 
-test('two core hits, then the core cools (BOSS_GUARD) until every ball is out or 2.5 s pass; ignored hits say so', () => {
+test('the per-entry hits, then the core cools (BOSS_GUARD) until every ball is out or the guard time passes; ignored hits say so', () => {
   for (const def of BOSS_DEFS()) {
     const t = contentWorld(def);
     const w = t.world;
+    const rules = coreRules(w.boss);
+    const n = rules.entryHits;
     const core = weakPoints(w);
     const p = insidePoint(w, def.id);
     const bi = w.api.spawnBall(p.x, p.y, 0, 0);
     const hp0 = w.boss.hp;
     const seen = (name, a) => t.events().filter((e) => e.name === name && (a === undefined || e.a === a)).length;
     t.hit(core[0]);
-    t.hit(core[0]); // inside the 500 ms cooldown: blocked, a = 0
+    t.hit(core[0]); // inside the cooldown: blocked, a = 0
     assert.equal(seen('BOSS_BLOCKED', 0), 1, `${def.id}: a hit inside the cooldown says it did not count`);
-    t.step(COOL);
-    t.hit(core[0]);
-    assert.equal(w.boss.hp, hp0 - 2, `${def.id}: two hits counted while the ball stayed in`);
+    for (let k = 1; k < n; k++) { t.step(COOL); t.hit(core[0]); }
+    assert.equal(w.boss.hp, hp0 - n, `${def.id}: ${n} hits counted while the ball stayed in`);
     assert.equal(w.boss.data.guard, 1, `${def.id}: the core cooled`);
     assert.equal(seen('BOSS_GUARD', 1), 1, `${def.id}: BOSS_GUARD a = 1 when it cools`);
     t.step(COOL);
     t.hit(core[0]);
-    assert.equal(w.boss.hp, hp0 - 2, `${def.id}: a cooled core ignores the hit`);
+    assert.equal(w.boss.hp, hp0 - n, `${def.id}: a cooled core ignores the hit`);
     assert.equal(seen('BOSS_BLOCKED', 1), 1, `${def.id}: and says so (BOSS_BLOCKED a = 1)`);
     w.balls[bi].alive = false;
     t.step(1);
     assert.equal(w.boss.data.guard, 0, `${def.id}: the ball left, the core takes hits again`);
     assert.equal(seen('BOSS_GUARD', 0), 1, `${def.id}: BOSS_GUARD a = 0 when it is hot again`);
     hitCoreTimes(t, core[0], 1);
-    assert.equal(w.boss.hp, hp0 - 3, `${def.id}: a new entry counts`);
-    // a ball that stays in: the core warms again on its own after GUARD_MS
+    assert.equal(w.boss.hp, hp0 - n - 1, `${def.id}: a new entry counts`);
+    // a ball that stays in: the core warms again on its own after the guard time
     const t2 = contentWorld(def);
     const core2 = weakPoints(t2.world);
     t2.world.api.spawnBall(p.x, p.y, 0, 0);
-    hitCoreTimes(t2, core2[0], 2);
+    hitCoreTimes(t2, core2[0], n);
     assert.equal(t2.world.boss.data.guard, 1, `${def.id}: cooled`);
-    t2.step(Math.ceil(CONTENT.GUARD_MS / 8.33) + 1);
-    assert.equal(t2.world.boss.data.guard, 0, `${def.id}: hot again after ${CONTENT.GUARD_MS} ms with the ball still in`);
+    t2.step(Math.ceil(rules.guardMs / 8.33) + 1);
+    assert.equal(t2.world.boss.data.guard, 0, `${def.id}: hot again after ${rules.guardMs} ms with the ball still in`);
     assert.equal(t2.events().filter((e) => e.name === 'BOSS_GUARD' && e.a === 0).length, 1, `${def.id}: and says so`);
   }
 });
 
-test('robot: a stay inside a ring scores two core hits, then waits 2.5 s (Crucible and every Core stage)', () => {
+test('rotating bosses count three hits a quarter second apart and cool 1.5 s; The Stoker keeps two, 500 ms and 2.5 s', () => {
+  for (const def of BOSS_DEFS()) {
+    const r = coreRules(contentWorld(def).world.boss);
+    if (def.id === 'the-stoker') assert.deepEqual({ ...r }, { cooldownMs: CONTENT.CORE_COOLDOWN_MS, entryHits: CONTENT.ENTRY_HITS, guardMs: CONTENT.GUARD_MS });
+    else assert.deepEqual({ ...r }, { ...ORBIT_RULES }, def.id);
+  }
+  assert.deepEqual({ ...ORBIT_RULES }, { cooldownMs: 250, entryHits: 3, guardMs: 1500 });
+  assert.equal(CRUCIBLE_SPEC.hp, 12, 'The Crucible: 12 core hits (was 20)');
+  assert.deepEqual(CORE_SPECS.slice(1).map((s) => s.hp), [5, 6, 6], 'The Core: 5, 6, 6 (stage 3 was 8)');
+});
+
+test('The Core stage 3: equal and opposite rings, so both gaps always meet at the bottom and the top', () => {
+  const t = contentWorld(getStage('core-3'));
+  const w = t.world, spec = CORE_SPECS[3];
+  const [inner, outer] = spec.rings;
+  assert.equal(inner.omega, -outer.omega);
+  assert.equal(inner.omega2, -outer.omega2);
+  const centre = (ring) => gapCentres(ring)[0];
+  const meets = [];
+  let prev = Infinity;
+  for (let k = 0; k < Math.ceil(30000 / 8.33); k++) {
+    const a = centre(inner) + w.boss.angle, b = centre(outer) + (w.boss.data.angle2 || 0);
+    const d = Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
+    if (d < 0.02 && prev >= 0.02) meets.push(Math.atan2(Math.sin(a), Math.cos(a)));
+    prev = d;
+    t.step(1);
+  }
+  assert.ok(meets.length >= 4, `the gaps met ${meets.length} times in 30 s`);
+  for (const m of meets) assert.ok(Math.abs(Math.abs(m) - Math.PI / 2) < 0.12, `they meet at the bottom or top (${m.toFixed(2)})`);
+});
+
+test('robot: a stay inside a ring scores three core hits, then waits 1.5 s (Crucible and every Core stage)', () => {
   const specs = { 'the-crucible': CRUCIBLE_SPEC, 'core-1': CORE_SPECS[1], 'core-2': CORE_SPECS[2], 'core-3': CORE_SPECS[3] };
   for (const [id, spec] of Object.entries(specs)) {
     const R = spec.rings[spec.rings.length - 1].r;
+    const { entryHits, guardMs } = spec.rules;
     const def = getStage(id);
     for (const perfect of [false, true]) {
       for (let seed = 1; seed <= 2; seed++) {
@@ -330,19 +364,22 @@ test('robot: a stay inside a ring scores two core hits, then waits 2.5 s (Crucib
             for (const b of w.balls) if (b.alive && Math.hypot(b.x - w.boss.x, b.y - w.boss.y) < R) any = true;
             while (next(rd)) if (rd.type === EV.BOSS_HIT && any) times.push(w.time);
             if (inside && !any) {
-              // within one stay, every third hit comes GUARD_MS or more after the second
-              for (let k = CONTENT.ENTRY_HITS; k < times.length; k += CONTENT.ENTRY_HITS) worstGap = Math.min(worstGap, times[k] - times[k - 1]);
+              // within one stay, every hit after a full count comes the guard time or more later
+              for (let k = entryHits; k < times.length; k += entryHits) worstGap = Math.min(worstGap, times[k] - times[k - 1]);
               if (times.length) stays++;
               times = [];
             }
             inside = any;
           },
         });
-        if (times.length) stays++; // the stay the fight ended in
+        if (times.length) stays++; // the stay the fight ended in, paced by the same rule
+        for (let k = entryHits; k < times.length; k += entryHits) worstGap = Math.min(worstGap, times[k] - times[k - 1]);
         assert.ok(r.cleared, `${id} seed ${seed} ${perfect ? 'perfect' : 'plain'}: cleared`);
-        assert.ok(worstGap >= CONTENT.GUARD_MS - 10, `${id} seed ${seed}: a third hit ${worstGap} ms after the second in one stay`);
-        // coverage, not a count to the hit (A2: the old "stays >= hp over 4 runs" was seed noise)
-        assert.ok(stays >= 2, `${id} seed ${seed} ${perfect ? 'perfect' : 'plain'}: the fight took several entries (${stays})`);
+        assert.ok(worstGap >= guardMs - 10, `${id} seed ${seed}: hit ${entryHits + 1} came ${worstGap} ms after hit ${entryHits} in one stay`);
+        // coverage, not a count to the hit (A2: the old "stays >= hp over 4 runs" was seed noise).
+        // A perfect shot into The Core's heart may stay long enough to win in one entry; it is
+        // then still paced by at least one full guard wait (worstGap measured above).
+        assert.ok(stays >= 2 || worstGap < Infinity, `${id} seed ${seed} ${perfect ? 'perfect' : 'plain'}: several entries or a guarded stay (${stays})`);
       }
     }
   }

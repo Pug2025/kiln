@@ -40,7 +40,7 @@ const COOLDOWN = Object.freeze({
   ballLost: 0.3, lifeLost: 0.3, lifeGained: 0.2, roar: 1.5, blast: 1.0, explosion: 0.06, laser: 0.05,
   overload: 0.2, shield: 0.1, clank: 0.05, bigClank: 0.08, hazard: 0.1, bossPhase: 0.5,
   portal: 0.08, land: 0.06, heatFull: 0.5, tick: 0.3, nearMiss: 0.2, cavity: 0.3, ui: 0.03,
-  victory: 2, bossBlocked: 0.08,
+  victory: 2, bossBlocked: 0.08, armour: 0.06,
 });
 const LENGTH = Object.freeze({
   brick: 0.45, hit: 0.15, paddle: 0.12, perfect: 0.26, wall: 0.04, ember: 0.08, combo: 0.6,
@@ -317,8 +317,9 @@ export function createAudio(opts = {}) {
     const now = ctx.currentTime;
     switch (rd.type) {
       case EV.BRICK_HIT:
-        // Permanent boss plates only deflect; they never get the ringing core-damage sound.
-        if (world?.boss?.id && world.bricks.type[rd.id] === BRICK.BOSS && (world.bricks.flags[rd.id] & BF.BOSS) && allow('bossBlocked', now)) sfx.bossBlocked(t, rd.x);
+        // Permanent boss plates only deflect: a light metal tick, never the core's ringing damage
+        // sound nor its low blocked knock (item 20: three outcomes that sound different).
+        if (world?.boss?.id && world.bricks.type[rd.id] === BRICK.BOSS && (world.bricks.flags[rd.id] & BF.BOSS) && allow('armour', now)) sfx.armourTick(t, rd.x);
         break;
       case EV.BRICK_BROKEN: {
         if (now - lastBrickAt < 1.5) rally = Math.min(9, rally + 1);
@@ -405,7 +406,8 @@ export function createAudio(opts = {}) {
         if (allow('explosion', now)) sfx.explosion(t + 0.02, rd.x);
         break;
       case EV.BOSS_HIT:
-        if (allow('bigClank', now)) sfx.clank(t, true, rd.x);
+        // rd.a = hp left, rd.b = hp max: the ring climbs as the core breaks
+        if (allow('bigClank', now)) sfx.coreHit(t, rd.x, rd.b > 0 ? 1 - rd.a / rd.b : 0);
         break;
       case EV.BOSS_BLOCKED:
         if (allow('bossBlocked', now)) sfx.bossBlocked(t, rd.x);

@@ -13,12 +13,12 @@
 // ball through one step) · bodies.js (embers, drops, hazards, lasers) · feel.js (anti-loop,
 // ceremony, near miss, aim line) · robot.js (the player).
 
-import { SIM, SPEED, PERFECT, POOL, BALL, PHYS, BF } from '../core/constants.js';
+import { SIM, SPEED, PERFECT, POOL, BALL, PHYS, BF, ANTILOOP } from '../core/constants.js';
 import { EV } from '../core/events.js';
 import { emit, createReader, next } from '../core/bus.js';
 import { setPhase, liveBalls } from '../core/world.js';
 import { createBrickGrid, rebuildGrid } from './collide.js';
-import { modeCode, paddleTrack, halfReach, fromLocal, normalAt, RING_FACE, M_BOTTOM, M_LEFT } from './field.js';
+import { modeCode, paddleTrack, halfReach, fromLocal, normalAt, RING_FACE, M_BOTTOM, M_LEFT, M_RING } from './field.js';
 import {
   bounceDir, spinSign, velNormOf, createPaddleState, updatePaddle, resetPaddleHistory,
 } from './paddle.js';
@@ -30,6 +30,9 @@ import { antiLoop, levelEnd, nearMiss, topSlow, aimLine, tickSlowmo, resetFx } f
 import { computeField } from './ceiling.js';
 
 const DEG = Math.PI / 180;
+/** Ring skate (ANTILOOP): the widest a bounce may leave from straight in once a ball skates the rim. */
+const SKATE_MAX = ANTILOOP.RING_SKATE_DEG * DEG;
+const SKATE_COS = Math.cos(SKATE_MAX), SKATE_SIN = Math.sin(SKATE_MAX);
 
 /**
  * Everything physics keeps per world besides world state: scratch vectors, the brick grid and
@@ -83,6 +86,7 @@ export function createCtx(world) {
     sig: new Int32Array(nb * 8),
     sigN: new Uint8Array(nb),
     portalTrips: new Uint8Array(nb),  // portal trips since the ball last hit something breakable
+    rimRun: new Uint8Array(nb),       // ring mode: paddle contacts in a row with nothing else touched
     nearGap: new Float64Array(nb).fill(1e9),
     nearArmed: new Uint8Array(nb).fill(1),
     topArmed: new Uint8Array(nb).fill(1), // top-speed slow-time not yet spent on this approach
@@ -153,6 +157,7 @@ export function createPhysics() {
     ctx.progressMs[bi] = ctx.world.time;
     ctx.sigN[bi] = 0;
     ctx.portalTrips[bi] = 0;
+    ctx.rimRun[bi] = 0;
     ctx.nearGap[bi] = 1e9;
     ctx.nearArmed[bi] = 1;
     ctx.topArmed[bi] = 1;
@@ -298,6 +303,31 @@ export function createPhysics() {
     if (w.effects.ballKind === 2 && liveBalls(w) < PHYS.SPLITTER_MAX) splitOne(bi, 1);
   }
 
+  /**
+   * Ring skate (ANTILOOP). Ring mode has no walls, and a paddle contact clears every other
+   * anti-loop count, so a ball sent far off-centre can skate round the rim from paddle to paddle
+   * for minutes with nothing else touched; a lagging hand chasing it adds its own speed to the
+   * angle and keeps the skate going. After RING_SKATE_CONTACTS paddle contacts in a row
+   * (ctx.rimRun counts this one too), the next bounce in ctx.p3 (normal ctx.p1, tangent ctx.p2,
+   * from bounceDir) leaves at most RING_SKATE_DEG from straight in, on the side the player sent
+   * it. Reported as a nudge, reason 4.
+   */
+  function skateTurn(bi) {
+    if (ctx.rimRun[bi] <= ANTILOOP.RING_SKATE_CONTACTS) return;
+    const n = ctx.p1, t = ctx.p2, o = ctx.p3;
+    const c = o.x * n.x + o.y * n.y, s = o.x * t.x + o.y * t.y;
+    if (c >= SKATE_COS) return;
+    const side = s < 0 ? -1 : 1;
+    o.x = n.x * SKATE_COS + side * t.x * SKATE_SIN;
+    o.y = n.y * SKATE_COS + side * t.y * SKATE_SIN;
+    // one turn, then the player's own aim again: a turned ball that still finds nothing (a last
+    // brick out wide on level 21) must not be held on a narrow line for good
+    ctx.rimRun[bi] = 0;
+    const w = ctx.world, b = w.balls[bi];
+    w.stats.nudges++;
+    emit(w.bus, EV.NUDGE, bi, b.x, b.y, side * ANTILOOP.RING_SKATE_DEG - Math.atan2(s, c) / DEG, 4);
+  }
+
   /** A paddle contact (called from ball.js with the contact in ctx.pad: u, body, cx, cy). */
   function onPaddle(bi) {
     const u = ctx.pad.u, body = ctx.pad.body, cx = ctx.pad.cx, cy = ctx.pad.cy;
@@ -307,12 +337,13 @@ export function createPhysics() {
     w.stats.paddleHits++;
     b.lastPaddleMs = w.time;
     b.bouncesNoBrick = 0;
+    if (mc === M_RING && ctx.rimRun[bi] < 255) ctx.rimRun[bi]++;
     ctx.progressMs[bi] = w.time;
     ctx.perfected[bi] = 0;
     pushSig(ctx, bi, 2000 + body, cx, cy);
-    // speed tier: +1 every 6 contacts, shared by every ball in play
+    // speed tier: +1 every 6 contacts (18 in ring mode, SPEED), shared by every ball in play
     p.contacts++;
-    if (p.contacts >= SPEED.CONTACTS_PER_TIER) {
+    if (p.contacts >= (mc === M_RING ? SPEED.RING_CONTACTS_PER_TIER : SPEED.CONTACTS_PER_TIER)) {
       p.contacts = 0;
       if (ctx.tier < 5) setTierAll(ctx.tier + 1);
     }
@@ -329,6 +360,7 @@ export function createPhysics() {
     }
     const vn = body === 0 ? velNormOf(p) : 0;
     bounceDir(mc, cx, cy, off, vn, ctx.p1, ctx.p2, ctx.p3);
+    if (mc === M_RING) skateTurn(bi);
     b.pierce = 0;
     const early = w.time - p.lastActionMs <= PERFECT.WINDOW_MS && p.lastActionMs !== ctx.usedPress;
     b.spin = vn * spinSign(mc);
@@ -348,6 +380,7 @@ export function createPhysics() {
     const cx = ctx.p1.x, cy = ctx.p1.y;
     const vn = velNormOf(p);
     bounceDir(mc, cx, cy, off, vn, ctx.p1, ctx.p2, ctx.p3);
+    if (mc === M_RING && ctx.caught[bi]) skateTurn(bi); // a caught skating ball is let go the same way
     b.held = false;
     b.spin = vn * spinSign(mc);
     ctx.spin0[bi] = b.spin;

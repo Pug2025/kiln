@@ -20,12 +20,15 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { FIELD, POOL, BRICK, BF, GRID } from '../core/constants.js';
 import { LOOK } from './look.js';
 import { createMarks } from './marks.js';
-import { isBossCore, coreProtected, CORE_COOL_HEAT } from './boss-feedback.js';
+import { createCoreDamage, BLOCK_FLASH_S } from './core-damage.js';
+import { isBossCore, coreProtected, blockDullsCore, CORE_COOL_HEAT } from './boss-feedback.js';
 
 const HW = FIELD.W / 2;
 const HH = FIELD.H / 2;
 const RUPT = 48;
 const CAP = POOL.BRICKS + RUPT;
+/** A blocked contact dips a hot core's own heat by this share of LOOK.HEAT_WEAK, easing back. */
+const BLOCK_DIP = 0.45;
 
 export const G_GLASS = 0;
 export const G_CLEAR = 1;
@@ -136,9 +139,12 @@ export function createBricks(scene, M) {
   // left mode turns the slab -90 degrees so its "under" side faces the paddle (marks.js agrees)
   const qLeft = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), -Math.PI / 2);
   let force = false;
+  let lastT = 0; // renderer seconds of the latest frame (event hooks without their own time)
+  let blockT = -1e9; // renderer seconds of the last blocked core contact that dulls the core
   const zero = new THREE.Matrix4().makeScale(0, 0, 0);
 
   const marks = createMarks(root, M);
+  const coreDamage = createCoreDamage(root);
 
   // Rows scrolling in from above (B unhides a row as it reaches the field) were drawn above the top
   // glass wall, over the phone HUD (review 2026-10-22). Every brick-wall material is clipped at the
@@ -263,12 +269,17 @@ export function createBricks(scene, M) {
     }
   }
 
-  /** Extra heat from hits, re-forming and the level-clear sweep. */
+  /** Extra heat from hits, re-forming and the level-clear sweep; a blocked core dips. */
   function extraHeat(i, y, t) {
-    if (isBossCore(world, i) && coreProtected(world)) return 0;
+    const core = isBossCore(world, i);
+    if (core && coreProtected(world)) return 0;
     let h = 0;
     const kf = (t - flashT[i]) / LOOK.HIT_FLASH_S;
     if (kf >= 0 && kf < 1) h += LOOK.HIT_FLASH * (1 - kf);
+    if (core) {
+      const kb = (t - blockT) / BLOCK_FLASH_S;
+      if (kb >= 0 && kb < 1) h -= BLOCK_DIP * LOOK.HEAT_WEAK * (1 - kb);
+    }
     const ks = (t - spawnT[i]) / LOOK.REFORM_SETTLE_S;
     if (ks >= 0 && ks < 1) h += LOOK.REFORM_GLOW * (1 - ks);
     if (clearT0 >= 0) h += sweepHeat(y, t);
@@ -288,7 +299,8 @@ export function createBricks(scene, M) {
   return {
     root,
     marks,
-    setReadability(info) { marks.setReadability(info); version = -1; },
+    coreDamage,
+    setReadability(info) { marks.setReadability(info); coreDamage.setReadability(info); version = -1; },
 
     setWorld(w) {
       world = w;
@@ -304,6 +316,7 @@ export function createBricks(scene, M) {
       useShape(mode === 'ring' ? 'square' : 'slab');
       flashT.fill(-1e9);
       spawnT.fill(-1e9);
+      blockT = -1e9;
       inMotionRow.fill(0);
       motionRow.fill(0);
       anyMotion = false;
@@ -314,6 +327,7 @@ export function createBricks(scene, M) {
       version = -1;
       lastCount = -1;
       marks.setWorld(w, mode);
+      coreDamage.setWorld(w);
     },
 
     /** Event hooks (called from the renderer's bus reader). t = renderer seconds. */
@@ -324,9 +338,22 @@ export function createBricks(scene, M) {
       marks.hit(i, t);
     },
     coreGuard(i, active) {
-      // Readiness itself is evaluated every frame from sim time, including cooldown expiry
-      // without a structural version change. Reopening never replays an old hit flash.
-      if (!active && i >= 0 && i < POOL.BRICKS) flashT[i] = -1e9;
+      // Readiness itself is evaluated every frame from sim time. Reopening never replays an old
+      // hit flash; the core re-heats with the short re-forming glow so "hot again" is seen.
+      if (!active && i >= 0 && i < POOL.BRICKS) {
+        flashT[i] = -1e9;
+        spawnT[i] = lastT;
+      }
+    },
+    /**
+     * A core contact that did not count (BOSS_BLOCKED; guard = the core is cooled): the core's
+     * own heat dips and its cracks flash ash for a moment, unless it is the rattle of a counted
+     * hit (blockDullsCore). The grey puff and dull knock come from the renderer and audio.
+     */
+    coreBlocked(t, guard) {
+      if (!blockDullsCore(world, guard)) return;
+      blockT = t;
+      coreDamage.blocked(t);
     },
     spawned(i, t) {
       if (i >= 0 && i < POOL.BRICKS) spawnT[i] = t;
@@ -366,6 +393,7 @@ export function createBricks(scene, M) {
      */
     frame(alpha, t, onRuptureEnd) {
       if (!world) return;
+      lastT = t;
       const B = world.bricks;
       if (force || changed()) {
         force = false;
@@ -417,6 +445,7 @@ export function createBricks(scene, M) {
         if (gr.heat) gr.heat.needsUpdate = true;
       }
       marks.frame(world, alpha, t, slotOf);
+      coreDamage.frame(world, alpha, t, coreProtected(world));
     },
 
     /** Heat a brick shows right now (fragments copy it). */
