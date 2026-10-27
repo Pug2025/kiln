@@ -41,6 +41,7 @@ import { createReadability, updateReadability } from '../core/readability.js';
 import { createRig } from './rig.js';
 import { createPost } from './post.js';
 import { loadKit } from './kit.js';
+import { submitShaderPreparation } from './shader-preparation.js';
 import { screenToFieldPose, restPose, createPose } from './fit.js';
 import { watchContext } from './glcontext.js';
 import { waitForFonts } from '../app/fonts.js';
@@ -123,27 +124,23 @@ export async function createRenderer(host, opts = {}) {
   // program nor issues a zero-instance draw call (review 2026-10-22)
   const pools = [];
   scene.traverse((o) => { if (o.isInstancedMesh) pools.push(o); });
-  loadKit({
-    M,
-    gl,
-    aniso: Math.min(8, gl.capabilities.getMaxAnisotropy()),
-    onDropAtlas: (t) => actors.setDropAtlas(t),
-    onModel: (id, s) => boss.setModel(id, s),
-    onPlate: (name, t) => headroom.setPlate(name, t),
-  }).then(() => {
-    // the kit swapped maps into materials (new programs) and added the boss meshes: compile them
-    // now, not at the first break, drop or boss of play
-    if (!disposed) { boss.refreshMaps(); warmUp(); }
-  }).catch(() => {});
   let disposed = false;
-  // a lost WebGL context (GPU reset, too many contexts): stop drawing, say so, and when three has
-  // rebuilt its GPU state on the restore, size the targets and compile the shaders again
+  let contextEpoch = 0;
+  let bootJob = null;
+  let kitStarted = false;
+  // Boot alone awaits asynchronous completion. Runtime preparation stays synchronous so no
+  // pending shader job can freeze a rally while main.js continues stepping the simulation.
   const glWatch = watchContext(canvas, {
     host,
+    onLost() {
+      contextEpoch++;
+      bootJob?.cancel('context-lost');
+    },
     onRestored() {
       if (disposed) return;
       gpuTimer.rebuild();
       resize();
+      boss.refreshMaps();
       warmUp();
     },
   });
@@ -152,6 +149,7 @@ export async function createRenderer(host, opts = {}) {
   let reader = null;
   let world = null;
   let t = 0;
+  let shaderOrigin = 0; // per-world procedural clock; event and camera ages keep lifetime t
   let lastNow = performance.now();
   let width = 1, height = 1, pr = 1;
   let breakBoost = 0;
@@ -173,6 +171,7 @@ export async function createRenderer(host, opts = {}) {
     // GPU time of the draw where the browser has a GPU timer (-1 without), its median, and the
     // quality ladder's step (pace.js STEP_NAMES)
     gpuMs: -1, gpuP50: -1, gpuTimer: false, step: 0, stepName: STEP_NAMES[0],
+    preparation: { capability: '', submissionMs: 0, completionMs: 0, reflectionMs: 0, preflightMs: 0, programs: 0, preparedPrograms: 0 },
     worst: { ms: 0, updateMs: 0, renderMs: 0, t: 0, programs: 0 },
     resetHist() { this.hist.fill(0); this.maxMs = 0; this.frames = 0; this.worst.ms = 0; },
   };
@@ -352,36 +351,136 @@ export async function createRenderer(host, opts = {}) {
     breakBoost = Math.max(breakBoost, 1);
   }
 
-  /**
-   * Compile every shader up front (hidden pieces too: bosses, overlays, ghosts, trail) so the first
-   * break, drop or boss never stalls a frame on a shader compile.
-   */
-  function warmUp() {
+  /** Reveal hidden variants only during a synchronous transaction, never across an await. */
+  function withWarmScene(operation) {
     unifyStandardMaterials(scene, M.tex);
     const previousTarget = gl.getRenderTarget();
     const hidden = [];
     scene.traverse((o) => {
-      if (!o.visible) {
-        hidden.push(o);
-        o.visible = true;
-      }
+      if (!o.visible) { hidden.push(o); o.visible = true; }
     });
     try {
       gl.initTexture(M.tex.neutralMap);
       gl.initTexture(M.tex.neutralNormal);
       actors.warmTextures(gl);
-      // Both qualities draw the scene linearly. Prepare that variant, then reflect the compiled
-      // drop and streak maps before their first actual draw, including late-kit/context variants.
       gl.setRenderTarget(post.composer.renderTarget1);
-      gl.compile(scene, camera);
-      actors.warmPrograms(gl);
-      post.warmUp();
-    } catch (e) {
-      console.warn('[kiln] shader warm-up', e);
+      return operation();
     } finally {
       gl.setRenderTarget(previousTarget);
       for (const o of hidden) o.visible = false;
     }
+  }
+
+  /** Runtime swaps/quality/restores remain synchronous, without a pending gameplay draw gate. */
+  function warmUp() {
+    if (disposed || glWatch.lost) return;
+    try {
+      withWarmScene(() => {
+        gl.compile(scene, camera);
+        actors.warmPrograms(gl);
+        post.warmUp();
+      });
+    } catch (e) {
+      console.warn('[kiln] shader warm-up', e);
+    }
+  }
+
+  /** Prepare first-use buffers, VAOs and local-clipping variants without a canvas/game draw. */
+  function preflightScene() {
+    const viewport = gl.getViewport(new THREE.Vector4());
+    const scissor = gl.getScissor(new THREE.Vector4());
+    const scissorTest = gl.getScissorTest(), autoClear = gl.autoClear;
+    const target = gl.getRenderTarget();
+    const culled = [], bounds = new Map();
+    scene.traverse((object) => {
+      if (object.frustumCulled) { culled.push(object); object.frustumCulled = false; }
+      for (const owner of [object, object.geometry]) {
+        if (owner && owner.boundingSphere !== undefined && !bounds.has(owner)) {
+          bounds.set(owner, { sphere: owner.boundingSphere, box: owner.boundingBox });
+        }
+      }
+    });
+    try {
+      gl.setViewport(0, 0, 1, 1);
+      gl.setScissor(0, 0, 1, 1);
+      gl.setScissorTest(true);
+      // Pinned r160 sets programs and VAOs before its zero-instance draw. Leave pool counts,
+      // instance matrices, world state and clocks untouched; even an empty pool is prepared.
+      gl.render(scene, camera);
+    } finally {
+      for (const object of culled) object.frustumCulled = true;
+      // Sorting may cache an empty pool's bounds before its first real contents arrive.
+      for (const [owner, previous] of bounds) {
+        owner.boundingSphere = previous.sphere;
+        if (previous.box !== undefined) owner.boundingBox = previous.box;
+      }
+      gl.autoClear = autoClear;
+      gl.setViewport(viewport); gl.setScissor(scissor); gl.setScissorTest(scissorTest);
+      gl.setRenderTarget(target);
+    }
+  }
+
+  /** The pinned native compileAsync loop cannot be cancelled; own its completion poll instead. */
+  async function prepareBoot() {
+    const epoch = contextEpoch;
+    const job = withWarmScene(() => submitShaderPreparation(gl, scene, camera, {
+      epoch, getEpoch: () => contextEpoch, isDisposed: () => disposed,
+    }));
+    bootJob = job;
+    try {
+      const result = await job.done;
+      if (disposed || contextEpoch !== epoch || glWatch.lost) {
+        const error = new Error('Graphics changed during startup');
+        error.name = 'AbortError';
+        throw error;
+      }
+      const started = performance.now();
+      let preflightMs = 0;
+      withWarmScene(() => {
+        const native = gl.getContext();
+        for (const program of result.programs) {
+          if (!native.getProgramParameter(program.program, native.LINK_STATUS)) {
+            throw new Error('Shader link failed: ' + native.getProgramInfoLog(program.program));
+          }
+          program.getUniforms();
+          program.getAttributes();
+        }
+        actors.warmPrograms(gl);
+        // Post programs are prepared by real offscreen draws, an explicit synchronous phase.
+        post.warmUp();
+        const preflightStart = performance.now();
+        preflightScene();
+        preflightMs = performance.now() - preflightStart;
+        // First-use clipping can acquire additional programs beyond public compile's set.
+        for (const program of gl.info.programs) {
+          if (!native.getProgramParameter(program.program, native.LINK_STATUS)) {
+            throw new Error('First-use shader link failed: ' + native.getProgramInfoLog(program.program));
+          }
+        }
+      });
+      Object.assign(stats.preparation, {
+        capability: result.capability, submissionMs: result.submissionMs,
+        completionMs: result.completionMs, reflectionMs: performance.now() - started - preflightMs,
+        preflightMs, programs: result.programs.length, preparedPrograms: gl.info.programs.length,
+      });
+    } finally {
+      if (bootJob === job) bootJob = null;
+    }
+  }
+
+  // Optional downloads begin after a real draw, outside the awaited startup snapshot.
+  function startKit() {
+    if (kitStarted || disposed) return;
+    kitStarted = true;
+    loadKit({
+      M, gl, isDisposed: () => disposed, canUpload: () => !glWatch.lost,
+      aniso: Math.min(8, gl.capabilities.getMaxAnisotropy()),
+      onDropAtlas: (texture) => actors.setDropAtlas(texture),
+      onModel: (id, model) => boss.setModel(id, model),
+      onPlate: (name, texture) => headroom.setPlate(name, texture),
+    }).then(() => {
+      if (!disposed) { boss.refreshMaps(); warmUp(); }
+    }).catch((error) => { if (!disposed) console.warn('[kiln] optional art preparation', error); });
   }
 
   // ---- per-frame helpers (no allocation) ----
@@ -425,7 +524,7 @@ export async function createRenderer(host, opts = {}) {
     bloomProjection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     const radius = post.paddleBloomRadius(w.paddle, w.level.mode, actors.pad.rotation.z,
       bloomProjection.elements, bw, bh, ax, ay, bx, by);
-    // The same screen capsule protects both fire depths, including the Lite direct path.
+    // The same screen capsule protects both fire depths, in both Full and Lite.
     fire.setScreenLegibility(ax, ay, bx, by, radius + 8 * pxPerUnit, 80 * pxPerUnit, menuOn ? 0 : 0.95);
     if (!post.bloomOn) return;
     post.setBloomMask(ax, ay, bx, by, radius, Math.max(2 * pr, 4 * pxPerUnit));
@@ -496,6 +595,8 @@ export async function createRenderer(host, opts = {}) {
   /** @type {import('../core/types.js').Renderer} */
   const api = {
     setWorld(w) {
+      const changed = w !== world;
+      if (changed) shaderOrigin = t;
       world = w;
       post.clearBallMasks();
       reader = reader ? resetReader(reader, w.bus, w.bus.head) : createReader(w.bus, 'render', w.bus.head);
@@ -509,7 +610,7 @@ export async function createRenderer(host, opts = {}) {
       headroom.setWorld(w);
       resize();
       trailFx.reset();
-      fire.reset();
+      fire.reset(changed);
       fx.clear();
       clearHold = 0;
       breakBoost = 0;
@@ -522,6 +623,7 @@ export async function createRenderer(host, opts = {}) {
       const dt = Math.min(0.1, Math.max(0, realDt || 0));
       t += dt;
       if (w !== world) api.setWorld(w);
+      const shaderT = Math.max(0, t - shaderOrigin);
       drain();
 
       // escalation (R19): last life
@@ -537,12 +639,12 @@ export async function createRenderer(host, opts = {}) {
 
       // fire: breathes with the combo, flares on hits and losses
       fire.setMult(w.econ.mult || 1);
-      const fi = fire.update(t, dt);
+      const fi = fire.update(shaderT, dt);
       legibility(w);
       if (clearHold > 0) clearHold -= dt;
       breakBoost = Math.max(0, breakBoost - dt * 2.5);
-      kiln.update(t, fi, clearHold > 0 ? 2 : 1, breakBoost);
-      headroom.frame(w, t, dt, fi);
+      kiln.update(t, fi, clearHold > 0 ? 2 : 1, breakBoost, shaderT);
+      headroom.frame(w, t, dt, fi, shaderT);
       const fl = kiln.fireLight;
       const want = LOOK.FIRE_LIGHT_BASE + LOOK.FIRE_LIGHT_GAIN * fi + LOOK.FIRE_LIGHT_BREAK * (breakBoost + (clearHold > 0 ? 1 : 0));
       fl.intensity += (want - fl.intensity) * Math.min(1, dt * 6);
@@ -551,8 +653,8 @@ export async function createRenderer(host, opts = {}) {
       actors.frame(w, alpha, t, fire, dt);
       pieces.frame(w, alpha, t);
       boss.frame(w, alpha, t, fi);
-      trailFx.frame(w, alpha, t);
-      overlays.frame(w, alpha, t, dt);
+      trailFx.frame(w, alpha, shaderT);
+      overlays.frame(w, alpha, shaderT, dt);
       fx.frame(dt, t);
       rig.update(t, dt, leadX(w), w.fx);
       bloomMask(w, alpha);
@@ -590,6 +692,7 @@ export async function createRenderer(host, opts = {}) {
         stats.worst.t = t;
         stats.worst.programs = gl.info.programs ? gl.info.programs.length : 0;
       }
+      startKit();
       return true;
     },
 
@@ -678,6 +781,7 @@ export async function createRenderer(host, opts = {}) {
 
     dispose() {
       disposed = true;
+      bootJob?.cancel('disposed');
       glWatch.dispose();
       post.dispose();
       gl.dispose();
@@ -687,7 +791,7 @@ export async function createRenderer(host, opts = {}) {
   };
 
   applyQuality();
-  warmUp();
+  try { await prepareBoot(); } catch (error) { api.dispose(); throw error; }
   if (opts.debug ?? params.get('debug') === '1') {
     import('../debug/overlay.js').then((m) => m.createOverlay(api, host)).catch((e) => console.warn('[kiln] debug overlay', e));
   }

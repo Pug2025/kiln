@@ -192,7 +192,7 @@ export function createFire(scene) {
       const k = Math.min(1, dt / LOOK.FIRE_EASE_S * 3); // reaches ~95% of a step in 0.6 s
       st.base += (st.target - st.base) * k;
       st.omega += (st.targetOmega - st.omega) * k;
-      st.phase += st.omega * dt;
+      st.phase = (st.phase + st.omega * dt) % (Math.PI * 2);
       if (st.hold > 0) st.hold -= dt;
       else {
         st.flare *= Math.pow(0.5, dt / LOOK.FLARE_HALF_S);
@@ -221,7 +221,9 @@ export function createFire(scene) {
       return st.value;
     },
 
-    reset() {
+    reset(resetClock = true) {
+      // Restart decoration only at a world transition. Combo/flare integration stays dt-based.
+      if (resetClock) { st.phase = 0; st.flow = 0; }
       for (let k = 0; k < 2; k++) mats[k].uniforms.uScreenStrength.value = 0;
       st.flare = 0;
       st.climb = 0;

@@ -20,10 +20,31 @@ export function parseReady(text) {
 }
 
 /**
- * @param {object} h hooks: { M, onDropAtlas(tex), onModel(id, scene), onPlate(name, tex), aniso }
+ * @param {object} h hooks: { M, onDropAtlas(tex), onModel(id, scene), onPlate(name, tex), aniso, isDisposed?, canUpload? }
  * @returns {Promise<Set<string>>} the final files that were found
  */
 export async function loadKit(h, base = KIT_BASE) {
+  const inactive = () => !!h.isDisposed?.();
+  const discarded = new WeakSet();
+  function discardTexture(texture) {
+    if (!texture || discarded.has(texture)) return;
+    discarded.add(texture);
+    texture.dispose();
+    texture.image?.close?.();
+  }
+  function discardModel(model) {
+    const resources = new Set();
+    model.traverse((object) => {
+      if (object.geometry) resources.add(object.geometry);
+      const materials = Array.isArray(object.material) ? object.material : [object.material];
+      for (const material of materials) if (material) {
+        resources.add(material);
+        for (const value of Object.values(material)) if (value?.isTexture) discardTexture(value);
+      }
+    });
+    for (const resource of resources) resource.dispose();
+  }
+  if (inactive()) return new Set();
   let ready;
   try {
     const r = await fetch(`${base}ARTKIT.READY`, { cache: 'no-cache' });
@@ -32,9 +53,10 @@ export async function loadKit(h, base = KIT_BASE) {
   } catch {
     return new Set();
   }
+  if (inactive()) return new Set();
   // Images decode off the main thread as ImageBitmaps where that is reliable (the same test as
-  // three's GLTFLoader), and each texture is uploaded as soon as it arrives (h.gl.initTexture), so
-  // a 1024 x 1536 plate never stalls a frame of play when it is first drawn.
+  // three's GLTFLoader). Upload an arriving texture while the context is valid to reduce
+  // first-use work. Upload and runtime shader preparation are still synchronous work.
   const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
   const safari = /^((?!chrome|android).)*safari/i.test(ua) ? Number((ua.match(/Version\/(\d+)/) || [0, 0])[1]) : -1;
   const firefox = ua.includes('Firefox') ? Number((ua.match(/Firefox\/(\d+)/) || [0, 0])[1]) : -1;
@@ -42,12 +64,13 @@ export async function loadKit(h, base = KIT_BASE) {
   const texLoader = new THREE.TextureLoader();
   const bmpLoader = bitmaps ? new THREE.ImageBitmapLoader().setOptions({ imageOrientation: 'flipY', premultiplyAlpha: 'none', colorSpaceConversion: 'none' }) : null;
   const tex = (path, srgb, repeat = true) => new Promise((resolve) => {
-    if (!ready.has(path)) return resolve(null);
+    if (inactive() || !ready.has(path)) return resolve(null);
     const done = (t) => {
+      if (inactive()) { discardTexture(t); resolve(null); return; }
       if (repeat) t.wrapS = t.wrapT = THREE.RepeatWrapping;
       t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
       t.anisotropy = h.aniso || 4;
-      if (h.gl && h.gl.initTexture) {
+      if (h.gl && h.gl.initTexture && (!h.canUpload || h.canUpload())) {
         try { h.gl.initTexture(t); } catch { /* uploads on first draw instead */ }
       }
       resolve(t);
@@ -59,7 +82,10 @@ export async function loadKit(h, base = KIT_BASE) {
         t.flipY = false; // flipped at decode
         t.needsUpdate = true;
         done(t);
-      }, undefined, () => texLoader.load(url, done, undefined, () => resolve(null)));
+      }, undefined, () => {
+        if (inactive()) resolve(null);
+        else texLoader.load(url, done, undefined, () => resolve(null));
+      });
     } else texLoader.load(url, done, undefined, () => resolve(null));
   });
   const M = h.M;
@@ -67,7 +93,7 @@ export async function loadKit(h, base = KIT_BASE) {
 
   // ceramic crackle (core map + normal), on the bricks, embers and ceramic fragments
   jobs.push(Promise.all([tex('textures/crackle.png', true), tex('textures/crackle_n.png', false)]).then(([c, n]) => {
-    if (!c || !n) return;
+    if (inactive() || !c || !n) { discardTexture(c); discardTexture(n); return; }
     for (const m of [M.core, M.fragCeramic, M.bossCore]) {
       if (!m) continue;
       m.map = c;
@@ -80,7 +106,7 @@ export async function loadKit(h, base = KIT_BASE) {
 
   // indestructible matte black: a very low-contrast obsidian detail (it still reflects nothing)
   jobs.push(Promise.all([tex('textures/obsidian.png', true), tex('textures/obsidian_n.png', false)]).then(([o, on]) => {
-    if (!o) return;
+    if (inactive() || !o) { discardTexture(o); discardTexture(on); return; }
     for (const m of [M.matte, M.matteP, M.matteFree]) {
       if (!m) continue;
       m.map = o;
@@ -94,7 +120,7 @@ export async function loadKit(h, base = KIT_BASE) {
 
   // drop glyph atlas (4 x 3 cells, DROP_NAMES order)
   jobs.push(tex('glyphs/drops.png', true, false).then((t) => {
-    if (!t) return;
+    if (!t || inactive()) { discardTexture(t); return; }
     t.minFilter = THREE.LinearMipmapLinearFilter;
     if (h.onDropAtlas) h.onDropAtlas(t);
   }));
@@ -103,9 +129,14 @@ export async function loadKit(h, base = KIT_BASE) {
   const models = ['stoker', 'crucible', 'core'].filter((id) => ready.has(`models/${id}.glb`));
   if (models.length && h.onModel) {
     jobs.push(import('three/addons/loaders/GLTFLoader.js').then(({ GLTFLoader }) => {
+      if (inactive()) return;
       const gl = new GLTFLoader();
       return Promise.all(models.map((id) => new Promise((resolve) => {
-        gl.load(`${base}models/${id}.glb`, (g) => { h.onModel(id, g.scene); resolve(); }, undefined, () => resolve());
+        gl.load(`${base}models/${id}.glb`, (g) => {
+          if (inactive()) discardModel(g.scene);
+          else h.onModel(id, g.scene);
+          resolve();
+        }, undefined, () => resolve());
       })));
     }).catch(() => {}));
   }
@@ -116,9 +147,9 @@ export async function loadKit(h, base = KIT_BASE) {
       const m = /^img\/headroom\/([\w-]+)\.(webp|png|jpg)$/.exec(path);
       if (!m) continue;
       // masks (_glow, _mask) are linear grey; plates and mid layers are sRGB
-      jobs.push(tex(path, !/_(glow|mask)$/.test(m[1]), false).then((t) => { if (t) h.onPlate(m[1], t); }));
+      jobs.push(tex(path, !/_(glow|mask)$/.test(m[1]), false).then((t) => { if (inactive()) discardTexture(t); else if (t) h.onPlate(m[1], t); }));
     }
-    if (ready.has('img/backdrop.webp')) jobs.push(tex('img/backdrop.webp', true, false).then((t) => { if (t) h.onPlate('backdrop', t); }));
+    if (ready.has('img/backdrop.webp')) jobs.push(tex('img/backdrop.webp', true, false).then((t) => { if (inactive()) discardTexture(t); else if (t) h.onPlate('backdrop', t); }));
   }
 
   await Promise.all(jobs);

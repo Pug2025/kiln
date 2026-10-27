@@ -4,9 +4,9 @@ import { LOOK } from './look.js';
 
 /**
  * Append three's tone mapping and output colour-space chunks to a ShaderMaterial fragment shader.
- * In the bloom path the scene renders into a linear target and both chunks are no-ops (the output
- * pass does ACES + sRGB for everything); in lite the scene draws straight to the canvas, and
- * without them every custom shader (fire, haze, sparks, glyphs) would skip ACES and sRGB.
+ * Both game qualities use a linear composer target, where these chunks are no-ops and the
+ * output pass applies ACES and sRGB once. Standalone users, including the wordmark, still need
+ * the chunks when their custom material draws directly to the canvas.
  */
 export function withOutput(src) {
   const k = src.lastIndexOf('}');

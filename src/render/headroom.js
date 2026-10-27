@@ -533,9 +533,9 @@ export function createHeadroom(scene) {
       st.boss = 1;
     },
 
-    frame(world, t, dt, fire) {
+    frame(world, t, dt, fire, shaderT = t) {
       const u = plateMat.uniforms;
-      u.uTime.value = st.reduceMotion || st.lite ? 0 : t;
+      u.uTime.value = st.reduceMotion || st.lite ? 0 : shaderT;
       u.uFire.value = st.reduceMotion ? 0.6 : fire;
       const e = world.econ;
       u.uHeat.value = e && e.heatMax ? Math.min(1, e.heat / e.heatMax) : 0;

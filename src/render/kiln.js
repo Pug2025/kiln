@@ -409,13 +409,13 @@ export function createKiln(scene, M) {
     },
 
     /** fi = the one fire number; glowMul from the wall firing. */
-    update(t, fi, glowMul, breakBoost) {
+    update(t, fi, glowMul, breakBoost, shaderT = t) {
       updateContact((t - contactT) / CEILING_ART.HIT_S);
       backMat.uniforms.uGlow.value = (0.6 + 0.5 * fi) * glowMul;
       deepLight.intensity = 30000 + 30000 * fi;
       bedMat.opacity = 0.5 + 0.35 * fi;
-      shaftMat.uniforms.uTime.value = t;
-      for (let i = 0; i < 4; i++) hazeTimes[i] = t + i * 7;
+      shaftMat.uniforms.uTime.value = shaderT;
+      for (let i = 0; i < 4; i++) hazeTimes[i] = shaderT + i * 7;
       hazeMat.uniforms.uWarm.value = 0.35 + 0.45 * fi;
       return breakBoost;
     },

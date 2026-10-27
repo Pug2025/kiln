@@ -125,6 +125,7 @@ export function createWordmarkFlame(host, opts = {}) {
   }
   if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
   const { gl, mat, canvas } = S;
+  let shaderOrigin = null; // a new owner starts its own decorative phase, independent of page uptime
 
   const handle = {
     /** Size the shared canvas to this slot (only while this slot holds it). */
@@ -141,9 +142,11 @@ export function createWordmarkFlame(host, opts = {}) {
     },
     /** @param {number} t seconds */
     frame(t) {
-      if (S.owner !== handle) return;
-      mat.uniforms.uTime.value = t * 1.4;
-      mat.uniforms.uIntensity.value = (opts.intensity ?? 1) * (1 + 0.15 * Math.sin(t * 2.1));
+      if (S.owner !== handle || !Number.isFinite(t)) return;
+      if (shaderOrigin === null) shaderOrigin = t;
+      const shaderT = Math.max(0, t - shaderOrigin);
+      mat.uniforms.uTime.value = shaderT * 1.4;
+      mat.uniforms.uIntensity.value = (opts.intensity ?? 1) * (1 + 0.15 * Math.sin(shaderT * 2.1));
       gl.render(S.scene, S.cam);
     },
     dispose() {

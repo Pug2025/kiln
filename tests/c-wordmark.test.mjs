@@ -71,3 +71,23 @@ test('title flame: the resize observer follows the slot that holds the canvas', 
   fa.dispose();
   assert.equal(observers.length, 1, 'one observer for the session');
 });
+
+test('title flame uses its owner mount age rather than growing page uptime', () => {
+  const uniforms = () => stub.STUB.renderLog.at(-1).scene.children[0].material.uniforms;
+  const low = createWordmarkFlame(slot());
+  low.frame(0); low.frame(60);
+  const expected = { time: uniforms().uTime.value, intensity: uniforms().uIntensity.value };
+  low.dispose();
+  const high = createWordmarkFlame(slot());
+  high.frame(79940); high.frame(80000);
+  assert.equal(uniforms().uTime.value, expected.time);
+  assert.equal(uniforms().uIntensity.value, expected.intensity);
+  const old = high, newer = createWordmarkFlame(slot());
+  old.frame(90000); newer.frame(80001);
+  assert.equal(uniforms().uTime.value, 0, 'stale owners cannot initialize a new owner origin');
+  newer.frame(80002);
+  assert.equal(uniforms().uTime.value, 1.4);
+  const count = stub.STUB.renders;
+  newer.frame(NaN); assert.equal(stub.STUB.renders, count, 'an invalid page timestamp cannot poison the mount origin');
+  newer.dispose(); old.dispose();
+});

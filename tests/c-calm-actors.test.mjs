@@ -215,9 +215,9 @@ test('production renderer warm-up prepares one linear variant and reflects drops
   }};
  const actors={warmTextures(){trace.push('textures');},warmPrograms(renderer){trace.push('reflect');assert.equal(programs.length,4);r.actors.warmPrograms(renderer);}};
  const source=readFileSync(new URL('../src/render/renderer.js',import.meta.url),'utf8');
- const begin=source.indexOf('  function warmUp() {'),end=source.indexOf('  // ---- per-frame helpers',begin);
+ const begin=source.indexOf('  function withWarmScene(operation) {'),end=source.indexOf('  // ---- per-frame helpers',begin);
  assert.ok(begin>=0&&end>begin);
- const warm=new Function('unifyStandardMaterials','scene','M','gl','actors','camera','post',`${source.slice(begin,end)};return warmUp;`)(()=>{},r.scene,r.M,gl,actors,camera,{composer:{renderTarget1:target},warmUp(){trace.push('post-warm');assert.equal(current,target);}});
+ const warm=new Function('unifyStandardMaterials','scene','M','gl','actors','camera','post','disposed','glWatch',`${source.slice(begin,end)};return warmUp;`)(()=>{},r.scene,r.M,gl,actors,camera,{composer:{renderTarget1:target},warmUp(){trace.push('post-warm');assert.equal(current,target);}},false,{lost:false});
  r.outlines.visible=false;const counts=f.meshes.map(m=>m.count);warm();
  assert.deepEqual(trace,['textures','target-linear','compile-linear','reflect','post-warm','target-caller']);
  assert.ok(programs.every(p=>p.initializations===1));assert.equal(r.outlines.visible,false,'hidden meshes restore after preparation');
