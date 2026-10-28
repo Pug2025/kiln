@@ -879,6 +879,7 @@ export async function boot(startup = null) {
   /** One frame of the loop at time `now` (ms). */
   function frameStep(now) {
     let rendered = false;
+    let drawn = false;
     const st = window.__kiln.stats;
     const realDt = Math.min(0.1, (now - app.last) / 1000);
     app.last = now;
@@ -899,6 +900,15 @@ export async function boot(startup = null) {
       if (done && !app.endAt) app.endAt = now + (w.level.def.continues && w.phase === 'cleared' ? STAGE_DELAY_MS : END_DELAY_MS);
       if (app.endAt && now >= app.endAt) {
         app.endAt = Infinity;
+        // A world that hands over to the next one (The Core's next stage, a new attract world)
+        // has its last frame drawn first, while the renderer still holds it; the next world is
+        // drawn from the next frame on. Drawn after the handover, the old world made the renderer
+        // switch back to it here and forward again next frame: two extra setWorld rebuilds in the
+        // frame that ends Core stage 1 (item 23).
+        if (app.attract || (app.mode === 'play' && w.phase === 'cleared' && w.level.def.continues)) {
+          rendered = renderer.frame(w, app.acc / SIM.DT, realDt) === true;
+          drawn = true;
+        }
         if (app.attract) startAttract();
         else if (app.mode === 'play') onWorldEnd();
       }
@@ -907,12 +917,14 @@ export async function boot(startup = null) {
         ui.card(null);
       }
     }
-    if (w) {
-      rendered = renderer.frame(w, app.acc / SIM.DT, realDt) === true;
+    // the HUD, sounds and the Overload button follow the world that is current now
+    const cw = app.world;
+    if (cw) {
+      if (!drawn) rendered = renderer.frame(cw, app.acc / SIM.DT, realDt) === true;
       readUiEvents();
-      ui.hud(w);
-      audio.frame(w, realDt);
-      updateOverloadButton(w);
+      ui.hud(cw);
+      audio.frame(cw, realDt);
+      updateOverloadButton(cw);
     }
     if (app.flame && app.flame.frame) app.flame.frame(now / 1000);
     st.frames++;

@@ -21,7 +21,8 @@ export function ballStreakPose(ball, alpha, out) {
   if (!ball?.alive || ball.held || ball.sealed >= 0 || !Number.isFinite(alpha)) return false;
   if (!Number.isFinite(ball.px) || !Number.isFinite(ball.py) || !Number.isFinite(ball.x) ||
       !Number.isFinite(ball.y) || !Number.isFinite(ball.r) || !(ball.r > 0)) return false;
-  const speed = Math.hypot(ball.vx, ball.vy);
+  // Math.sqrt, not Math.hypot: V8 boxes a builtin call's fractional arguments every frame (item 21)
+  const speed = Math.sqrt(ball.vx * ball.vx + ball.vy * ball.vy);
   if (!(speed > 0) || !Number.isFinite(speed)) return false;
   const x = ball.px + (ball.x - ball.px) * alpha;
   const y = ball.py + (ball.y - ball.py) * alpha;
@@ -182,7 +183,7 @@ export function createTrail(scene) {
             const a = (hHead[b] - j + HIST) % HIST, c = (hHead[b] - j - 1 + HIST) % HIST;
             const ax = j === 0 ? x : hx[k0 + a], ay = j === 0 ? y : hy[k0 + a];
             const sx = hx[k0 + c] - ax, sy = hy[k0 + c] - ay;
-            const sl = Math.hypot(sx, sy);
+            const sl = Math.sqrt(sx * sx + sy * sy); // not Math.hypot (boxed arguments, item 21)
             if (sl < 1e-4) { j++; continue; }
             if (walked + sl >= want) {
               const f = (want - walked) / sl;

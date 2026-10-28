@@ -50,14 +50,22 @@ export function createCoreDamage(root) {
   group.add(cuts, heat);
 
   const cutCol = new THREE.Color(0x07080a);
+  // the dark cut never changes colour: written once for every slot, not every frame
+  for (let i = 0; i < CAP; i++) cuts.setColorAt(i, cutCol);
   // settled cracks are paler than the orange core (heat leaking through), fresh ones near white
   const fresh = PAL.heatHi.clone().multiplyScalar(0.92);
   const ember = PAL.heatLo.clone().lerp(PAL.heatHi, 0.5).multiplyScalar(0.88);
   const coldEmber = PAL.heatLo.clone().multiplyScalar(0.5);
   const ashCol = new THREE.Color(0x5f5d5a); // dull warm grey, darker than any heat
-  const tmp = new THREE.Color();
-  const m4 = new THREE.Matrix4(), pos = new THREE.Vector3(), scl = new THREE.Vector3(), q = new THREE.Quaternion();
-  const zAxis = new THREE.Vector3(0, 0, 1);
+  // Item 21 (Oct 27): frame() writes the instance arrays itself. Calling Vector3.set,
+  // Quaternion.setFromAxisAngle, Matrix4.compose, Color.lerp and Math.hypot per segment made V8 box
+  // every fractional argument, about 0.18 KB a frame per crack shown (2 KB on a Crucible near the
+  // end). The arithmetic is three's own (setFromAxisAngle about z, then compose; Color.lerp), so
+  // the matrices and colours are the same. Colours are read from this array, not from objects.
+  const COL = new Float64Array([
+    ember.r, ember.g, ember.b, coldEmber.r, coldEmber.g, coldEmber.b,
+    fresh.r, fresh.g, fresh.b, ashCol.r, ashCol.g, ashCol.b,
+  ]);
 
   let plan = null, shown = 0;
   let planDef = null, planCore = -1, planMax = -1, planW = -1, planH = -1;
@@ -75,6 +83,8 @@ export function createCoreDamage(root) {
   return {
     group,
     get shown() { return shown; },
+    /** The current fracture plan (crackPlan's segments), for tests. */
+    get plan() { return plan; },
     setReadability(info) { read.small = !!info?.small; read.scale = info?.scale || 1; },
 
     /** A new world: forget the old core (the plan is rebuilt from the live core on the next frame). */
@@ -99,7 +109,7 @@ export function createCoreDamage(root) {
       if (core < 0) { cuts.count = heat.count = 0; return; }
       const B = world.bricks;
       // Rebuilt only when the fight changes (not boss.phase: The Crucible's half-health phase keeps
-      // its cracks). Compared field by field, so a frame allocates nothing.
+      // its cracks). Compared field by field, with no key string built per frame.
       if (world.level.def !== planDef || core !== planCore || boss.hpMax !== planMax || B.w[core] !== planW || B.h[core] !== planH) {
         planDef = world.level.def; planCore = core; planMax = boss.hpMax; planW = B.w[core]; planH = B.h[core];
         const key = `${boss.id}:${world.level.def.id}:${B.w[core]}x${B.h[core]}:${boss.hpMax}`;
@@ -117,40 +127,44 @@ export function createCoreDamage(root) {
       const cy = HH - (moving ? B.py[core] + (B.y[core] - B.py[core]) * alpha : B.y[core]);
       // a phone keeps a crack at least 1.5 CSS px wide (its cut 3 px), like the hit-line floor;
       // so does a core too small on screen for field-unit cracks to read (review Oct 27)
-      const px = read.small || B.w[core] * read.scale < SMALL_CORE_PX ? 1 / read.scale : 0;
-      const wHeat = Math.max(1.7, 1.5 * px), wCut = wHeat + Math.max(2.6, 1.5 * px);
+      const floor = read.small || B.w[core] * read.scale < SMALL_CORE_PX ? 1 / read.scale : 0;
+      const wHeat = Math.max(1.7, 1.5 * floor), wCut = wHeat + Math.max(2.6, 1.5 * floor);
       const b = t - blockT, dull = b >= 0 && b < BLOCK_FLASH_S ? 1 - b / BLOCK_FLASH_S : 0;
+      const cm = cuts.instanceMatrix.array, hm = heat.instanceMatrix.array, hc = heat.instanceColor.array;
+      const c0 = cold ? 3 : 0, er = COL[c0], eg = COL[c0 + 1], eb = COL[c0 + 2];
+      const segs = plan.length / 5;
       let n = 0;
-      for (let s = 0; s < plan.length / 5; s++) {
-        const k = plan[s * 5 + 4];
+      for (let s = 0; s < segs; s++) {
+        const p = s * 5, k = plan[p + 4];
         if (k >= shown) continue;
         const age = t - revealT[k];
         // a quarter of the crack shows on the very frame of the hit, the rest runs out after it
         const grow = Math.min(1, 0.25 + 0.75 * Math.max(0, age / CRACK_GROW_S));
-        const x0 = plan[s * 5], y0 = plan[s * 5 + 1], x1 = plan[s * 5 + 2], y1 = plan[s * 5 + 3];
-        const dx = (x1 - x0) * grow, dy = (y1 - y0) * grow;
-        const l = Math.hypot(dx, dy);
+        const x0 = plan[p], y0 = plan[p + 1];
+        const dx = (plan[p + 2] - x0) * grow, dy = (plan[p + 3] - y0) * grow;
+        const l = Math.sqrt(dx * dx + dy * dy);
         if (l < 0.01) continue;
-        q.setFromAxisAngle(zAxis, Math.atan2(-dy, dx));
-        pos.set(cx + x0 + dx / 2, cy - (y0 + dy / 2), zCut);
-        scl.set(l + wCut * 0.6, wCut, 1);
-        m4.compose(pos, q, scl);
-        cuts.setMatrixAt(n, m4);
-        cuts.setColorAt(n, cutCol);
-        pos.z = zHeat;
-        scl.set(l, wHeat, 1);
-        m4.compose(pos, q, scl);
-        heat.setMatrixAt(n, m4);
+        // a rotation about z by atan2(-dy, dx), as Quaternion.setFromAxisAngle then Matrix4.compose
+        // build it; the slots' other entries keep InstancedMesh's identity
+        const half = Math.atan2(-dy, dx) / 2, qz = Math.sin(half), z2 = qz + qz;
+        const rc = 1 - qz * z2, rs = Math.cos(half) * z2;
+        const mx = cx + x0 + dx / 2, my = cy - (y0 + dy / 2);
+        const o = n * 16, cw = l + wCut * 0.6;
+        cm[o] = rc * cw; cm[o + 1] = rs * cw; cm[o + 4] = -rs * wCut; cm[o + 5] = rc * wCut;
+        cm[o + 12] = mx; cm[o + 13] = my; cm[o + 14] = zCut;
+        hm[o] = rc * l; hm[o + 1] = rs * l; hm[o + 4] = -rs * wHeat; hm[o + 5] = rc * wHeat;
+        hm[o + 12] = mx; hm[o + 13] = my; hm[o + 14] = zHeat;
+        // the ember, toward white while fresh, toward ash for a moment after a block (Color.lerp)
         const f = age < CRACK_FRESH_S ? 1 - age / CRACK_FRESH_S : 0;
-        tmp.copy(cold ? coldEmber : ember).lerp(fresh, f);
-        if (dull > 0) tmp.lerp(ashCol, dull);
-        heat.setColorAt(n, tmp);
+        let r = er + (COL[6] - er) * f, g = eg + (COL[7] - eg) * f, bl = eb + (COL[8] - eb) * f;
+        if (dull > 0) { r += (COL[9] - r) * dull; g += (COL[10] - g) * dull; bl += (COL[11] - bl) * dull; }
+        const oc = n * 3;
+        hc[oc] = r; hc[oc + 1] = g; hc[oc + 2] = bl;
         n++;
       }
       cuts.count = heat.count = n;
       cuts.instanceMatrix.needsUpdate = heat.instanceMatrix.needsUpdate = true;
-      if (cuts.instanceColor) cuts.instanceColor.needsUpdate = true;
-      if (heat.instanceColor) heat.instanceColor.needsUpdate = true;
+      heat.instanceColor.needsUpdate = true;
     },
   };
 }

@@ -45,8 +45,14 @@ const PLATE_CAP = LOOK.PLATE_CAP;
 const PIVOT = {
   stoker: [513 / 1024, 1 - 306 / 1536],   // the port
   crucible: [0.5, 1.0],                    // the top centre (sway)
-  core: [515 / 1024, 1 - 435 / 1536],     // the sphere
+  core: [512 / 1024, 1 - 300 / 1536],     // the sun
 };
+// The Core's petals (ART 15.4 R4, 15.9; ARTKIT "Headroom layers"): the mid art rests parted as the
+// model's stage 3. Each stage slides every petal in along its own middle (plate px; the model's 18
+// and 9 units); the first petal's middle points CORE_PETAL radians from +x (uv y up). The petals
+// hold still: their light is painted in, and a turning set would carry its key light round.
+const CORE_PART = [0, -20.2, -10.1, 0];
+const CORE_PETAL = (120 * Math.PI) / 180;
 
 // ---------------------------------------------------------------- procedural placeholder plates
 function prng(seed) {
@@ -260,6 +266,7 @@ const PLATE_FRAG = withOutput(`
 const MID_FRAG = withOutput(`
   precision highp float; varying vec2 vUv; varying vec3 vW; uniform sampler2D uMid; uniform float uFire, uBoss, uWallY;
   uniform vec3 uHeatLo; uniform vec4 uCrop, uBox; uniform vec2 uPivot, uShift; uniform float uRot, uScale, uFade, uGain, uTint, uQuietBody;
+  uniform float uPart, uPetal;
   ${QUIET}
   ${HUD_GLSL}
   void main(){
@@ -268,6 +275,11 @@ const MID_FRAG = withOutput(`
     vec2 p = (uv - uPivot - uShift) * vec2(1024.0, 1536.0) / uScale;
     float c = cos(uRot), s0 = sin(uRot);
     p = vec2(c * p.x + s0 * p.y, -s0 * p.x + c * p.y);
+    // three petals 120 degrees apart: each slides uPart plate px along its own middle
+    if (uPart != 0.0) {
+      float b = uPetal + floor((atan(p.y, p.x) - uPetal) / 2.0943951 + 0.5) * 2.0943951;
+      p -= vec2(cos(b), sin(b)) * uPart;
+    }
     uv = uPivot + p / vec2(1024.0, 1536.0);
     vec4 s = texture2D(uMid, uv);
     if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) s = vec4(0.0);
@@ -324,6 +336,7 @@ export function createHeadroom(scene) {
       uWallY: { value: 0.3 }, uCrop: { value: new THREE.Vector4(0, 0, 1, 1) },
       uPivot: { value: new THREE.Vector2(0.5, 0.5) }, uShift: { value: new THREE.Vector2(0, 0) },
       uRot: { value: 0 }, uScale: { value: 1 }, uFade: { value: 0.85 }, uGain: { value: 0.26 }, uTint: { value: 1 },
+      uPart: { value: 0 }, uPetal: { value: CORE_PETAL },
       uQuietBody: { value: 1 }, uBox: { value: new THREE.Vector4(0, 0, 0, 0) },
       uHud: { value: new THREE.Vector2(1e5, 0) }, uGut: { value: new THREE.Vector2(1e5, 1) },
     },
@@ -425,7 +438,7 @@ export function createHeadroom(scene) {
     applyBox();
   }
 
-  const st = { name: '', kit: false, lite: false, reduceMotion: false, clearT0: -1, boss: 0, lastPhase: 0 };
+  const st = { name: '', kit: false, lite: false, reduceMotion: false, clearT0: -1, boss: 0, lastPhase: 0, corePart: 0 };
 
   function use(name, grade) {
     const p = getPlate(name);
@@ -452,6 +465,7 @@ export function createHeadroom(scene) {
     v.uRot.value = 0;
     v.uScale.value = 1;
     v.uShift.value.set(0, 0);
+    v.uPart.value = kit && name === 'core' ? st.corePart : 0;
     mid.visible = !!p.mid; // lite keeps the mid at rest (ARTKIT "plus the mid at rest")
   }
 
@@ -510,6 +524,8 @@ export function createHeadroom(scene) {
         grade = 1;
       }
       if (!PLATES.includes(name)) name = 'ember';
+      // The Core's petals close for stages 1 and 2 (also in lite and reduced motion: a stage state)
+      st.corePart = name === 'core' ? CORE_PART[Math.max(1, Math.min(3, def.stage || 1))] : 0;
       use(name, grade);
       st.clearT0 = -1;
       st.boss = 0;
@@ -557,11 +573,9 @@ export function createHeadroom(scene) {
         v.uScale.value = 1 + 0.06 * open;
       } else if (st.name === 'crucible') {
         v.uRot.value = 0.026 * Math.sin(t * 0.55);
-      } else if (st.name === 'core') {
-        v.uShift.value.set(0, 0.035 * open);
-        v.uScale.value = 1 + 0.05 * open;
-        v.uFade.value = 1 - 0.6 * open;
       }
+      // The Core's mid moves only with the stage (setWorld). Orbit bosses hold boss.open at 1, so
+      // the old open-driven shift, swell and fade showed a ghost of the shields on every stage.
     },
   };
 }

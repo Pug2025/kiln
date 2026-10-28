@@ -34,8 +34,10 @@ export function writeBallBloom(out, world, alpha, clip, width, height, enabled =
     const ey = (clip[1] * (x + b.r) + clip[5] * y + clip[13]) / xw;
     const fx = (clip[0] * x + clip[4] * (y - b.r) + clip[12]) / yw;
     const fy = (clip[1] * x + clip[5] * (y - b.r) + clip[13]) / yw;
-    const radius = Math.max(Math.hypot((ex - cx) * width / 2, (ey - cy) * height / 2),
-      Math.hypot((fx - cx) * width / 2, (fy - cy) * height / 2));
+    // Math.sqrt, not Math.hypot: V8 boxes a builtin call's fractional arguments (item 21)
+    const ax = (ex - cx) * width / 2, ay = (ey - cy) * height / 2;
+    const bx = (fx - cx) * width / 2, by = (fy - cy) * height / 2;
+    const radius = Math.sqrt(Math.max(ax * ax + ay * ay, bx * bx + by * by));
     if (!(radius > 0 && Number.isFinite(radius))) continue;
     const j = count++ * 4;
     out[j] = (cx + 1) * width / 2;
@@ -72,7 +74,8 @@ export function paddleBloomRadius(p, mode, rotation, clip, width, height, ax, ay
     const sx = ((clip[0] * x + clip[4] * y + clip[8] * z + clip[12]) / cw + 1) * width / 2;
     const sy = ((clip[1] * x + clip[5] * y + clip[9] * z + clip[13]) / cw + 1) * height / 2;
     const k = Math.max(0, Math.min(1, ((sx - ax) * dx + (sy - ay) * dy) / length2));
-    radius = Math.max(radius, Math.hypot(sx - ax - dx * k, sy - ay - dy * k));
+    const ox = sx - ax - dx * k, oy = sy - ay - dy * k;
+    radius = Math.max(radius, Math.sqrt(ox * ox + oy * oy)); // not Math.hypot: V8 boxes its arguments (item 21)
   }
   return radius + BALL_BLOOM.FILTER_PAD;
 }

@@ -13,11 +13,10 @@ not change when the final lands.
 
 | Path | Pixels | Format | Colour space | Alpha | Consumer | Status |
 |---|---|---|---|---|---|---|
-| `textures/crackle.png` | 1024x1024 | PNG RGB | sRGB | none | C: ceramic core `map` | final |
-| `textures/crackle_n.png` | 1024x1024 | PNG RGB | linear | none | C: ceramic core `normalMap` (scale 0.5) | final |
-| `textures/carbon_detail.png` | 1024x1024 | PNG grey | linear | none | C: roughness / detail map (bright = crack line, rough) | final |
-| `textures/obsidian.png` | 1024x1024 | PNG RGB | sRGB | none | C: indestructible grain, a multiply `map` (near white, mean 0.85 linear) under the matte colour | final |
-| `textures/obsidian_n.png` | 1024x1024 | PNG RGB | linear | none | C: indestructible `normalMap` (bead-blasted grain, gentle) | final |
+| `textures/crackle.png` | 512x512 | PNG RGB | sRGB | none | C: ceramic core `map`: dark warm-graphite glaze, no veins and no weave (linear luminance mean .0131, the old map's), so a face may sample the whole map | final |
+| `textures/crackle_n.png` | 512x512 | PNG RGB | linear | none | C: ceramic core `normalMap` (scale 0.5): the glaze with the veins of `crackle_mask.png` as shallow grooves (primaries deeper than hairlines), in register with it (sample both at the same uv) | final |
+| `textures/crackle_mask.png` | 1024x1024 | PNG RGB | linear | none | C9: two vein masks (ART 15.4 R1), sampled at vMapUv x (.2, .08) plus a per-brick offset; upload as RG8 (C28). R: the primary veins only, 6 to 8 px with a 2 px anti-aliased edge; a vein is where R is .5 or more (smoothstep(.5 - fwidth, .5 + fwidth)). They bound cells of about 165 px, so a core shows 2 to 4. G: the 3 px hairlines as a soft value (1 on the line, .5 at 1.5 px, 0 at 3 px) splitting those into 70 to 100 px cells; never threshold G: weight it about .35 of the primaries and fade it out as a hairline drops under about half a device px (x smoothstep(.35, .75, 3 / mask px per device px)). Every junction is a T and no vein has a free end. B is 0. Made by `tools/art/crackle.py`; nothing loads it before C9 | final |
+| `textures/obsidian.png` | 512x512 | PNG grey | sRGB | none | C: indestructible grain, a multiply `map` (near white, mean 0.85 linear) under the matte colour | final |
 | `glyphs/wide.png` | 256x256 | PNG RGBA | sRGB | luminance | C: drop glyph source, id 0 | final |
 | `glyphs/slow.png` | 256x256 | PNG RGBA | sRGB | luminance | C: drop glyph source, id 1 | final |
 | `glyphs/multi.png` | 256x256 | PNG RGBA | sRGB | luminance | C: drop glyph source, id 2 | final |
@@ -31,7 +30,7 @@ not change when the final lands.
 | `glyphs/fog.png` | 256x256 | PNG RGBA | sRGB | luminance | C: drop glyph source, id 10 | final |
 | `glyphs/mega.png` | 256x256 | PNG RGBA | sRGB | luminance | C: drop glyph source, id 11 | final |
 | `glyphs/drops.png` | 1024x768 | PNG RGBA | sRGB | luminance | C: drop glyph atlas (layout below) | final |
-| `img/backdrop.webp` | 2048x1024 | WebP | sRGB | none | C: kiln back plate behind the arena (wraps left/right) | final |
+| `img/backdrop.webp` | 2048x1024 | WebP | sRGB | none | C: the kiln's back wall behind the arena and in the gutters (ART 15.4 R10; not drawn until C5b routes it into the z -1050 back wall, so repeat the in-game check on C5b's code). The Ember wall's brushed-titanium double ribs over smoked glass: lit from above (a highlight on each bar's left edge, the key side) and by the hearth from below (inner edges warm toward the centre); no emitters, peak .04 linear; rows .55 to 1 keep a faint heat bounce (mean about .0037). Mapping: repeat x, clamp y; one tile = 3590.4 x 1795.2 back-wall units, u = x / 3590.4 + .5, v = (y + 800) / 1795.2 (image bottom at world y -800). 3590.4 is 24 periods of BACK_FRAG's rib sine (2 pi / .042 = 149.6), so the painted ribs sit on its crests (x = 37.4 + 149.6 k): keep that term. Mix .5 replaces the procedural base and rib colour only; add the uHeatLo glow after the mix, so it keeps uGlow and the last-life shift (a plain mix of the whole colour lowers the wall behind the field by about 20%) | final |
 | `img/hearth.webp` | 1536x1536 | WebP | sRGB | none | D: title and boot backdrop (cover-fit, anchor bottom centre) | final |
 | `img/levels/ember.webp` | 1024x576 | WebP | sRGB | none | D: level-map card, Ember (1 to 10) | final |
 | `img/levels/blaze.webp` | 1024x576 | WebP | sRGB | none | D: level-map card, Blaze (11 to 20) | final |
@@ -39,19 +38,18 @@ not change when the final lands.
 | `img/levels/overburn.webp` | 1024x576 | WebP | sRGB | none | D: level-map card, Overburn | final |
 | `img/headroom/ember.webp` | 1024x1536 | WebP | sRGB | none | C: headroom far layer, Ember 1 to 9 (and Overburn, graded); the style anchor for every painted piece (ART 15.4 R9) | final |
 | `img/headroom/ember_glow.png` | 512x768 | PNG RGB | linear | none | C: Ember masks: R glow (the crown seam only, 0 on metal; peaks at 0.30, pre-scaled so the plate meets ART 15.2 with KIT_GLOW 0.12), G structure (ribs and seam, faded with the plate by row .46, for the clear wave), B 0 | final |
-| `img/headroom/blaze.webp` | 1024x1536 | WebP | sRGB | none | C: headroom far layer, Blaze 11 to 19 | final |
-| `img/headroom/blaze_glow.png` | 512x768 | PNG grey | linear | none | C: Blaze emissive mask | final |
-| `img/headroom/whiteheat.webp` | 1024x1536 | WebP | sRGB | none | C: headroom far layer, White Heat 21 to 29 | final |
-| `img/headroom/whiteheat_glow.png` | 512x768 | PNG grey | linear | none | C: White Heat emissive mask | final |
-| `img/headroom/stoker.webp` | 1024x1536 | WebP | sRGB | none | C: headroom far layer, The Stoker (10) | final |
-| `img/headroom/stoker_mid.webp` | 1024x1536 | WebP RGBA | sRGB | straight | C: Stoker mid layer: the iris | final |
-| `img/headroom/stoker_glow.png` | 512x768 | PNG grey | linear | none | C: Stoker emissive mask | final |
-| `img/headroom/crucible.webp` | 1024x1536 | WebP | sRGB | none | C: headroom far layer, The Crucible (20) | final |
-| `img/headroom/crucible_mid.webp` | 1024x1536 | WebP RGBA | sRGB | straight | C: Crucible mid layer: vessel and arms | final |
-| `img/headroom/crucible_glow.png` | 512x768 | PNG grey | linear | none | C: Crucible emissive mask | final |
-| `img/headroom/core.webp` | 1024x1536 | WebP | sRGB | none | C: headroom far layer, The Core (30) | final |
-| `img/headroom/core_mid.webp` | 1024x1536 | WebP RGBA | sRGB | straight | C: Core mid layer: the shield rings | final |
-| `img/headroom/core_glow.png` | 512x768 | PNG grey | linear | none | C: Core emissive mask | final |
+| `img/headroom/blaze.webp` | 1024x1536 | WebP | sRGB | none | C: headroom far layer, Blaze 11 to 19 (ART 15.4 R3): one smoked-glass transfer line rising on a diagonal through the top edge, one molten slug in its upper glass sight section (rows .02 to .052, columns .56 to .58) and no heat below its middle collar (row .056); below the collar the line fades into the base by row .080, above the desktop lintel (its top edge shows row .081 to .083 at every camera lean); two cold risers behind; physically lit (Cycles) and graded to the anchor's levels; heat peak about 0.07 linear, everything below row .137 at or under 0.0082 linear, flat world base from row .38 | final |
+| `img/headroom/blaze_glow.png` | 512x768 | PNG RGB | linear | none | C: Blaze masks: R glow (the one slug only, rows .02 to .053, 0 on metal and glass; peaks at 0.044 so L14 desktop keeps the plate's brightest 10% under half the brick mean even at full heat), G structure (rims and collars; the line's gone by row .080, the risers' faded by row .33), B 0 | final |
+| `img/headroom/whiteheat.webp` | 1024x1536 | WebP | sRGB | none | C: headroom far layer, Inferno 21 to 29 (ART 15.4 R2): one horizontal oculus at the crown (rim rows .015 to .068, columns .26 to .74, so it sits above the lintel at desktop), six dark titanium louvres, heat in the five gaps; straight titanium ribs radiate from it and fade by row .42. Near-lossless, so the 1 to 2 px heat lines keep their colour | final |
+| `img/headroom/whiteheat_glow.png` | 512x768 | PNG RGB | linear | none | C: Inferno masks: R glow (the five heat lines only, 0 on blade faces, rim and ribs; peaks at 0.85), G structure (rim, ribs and blade lips, faded with the plate by row .46, for the clear wave), B 0 | final |
+| `img/headroom/stoker.webp` | 1024x1536 | WebP | sRGB | none | C: headroom plate, The Stoker (10): a bullnosed brushed-titanium cowl across the top, one thin horizontal mouth slot of heat (rows .045 to .048, columns .31 to .69, the only emitter), two flue stacks behind it falling into the dark (ART 15.4 R8; built in Blender, no mid layer, see the Headroom layers table) | final |
+| `img/headroom/stoker_glow.png` | 512x768 | PNG RGB | linear | none | C: Stoker masks: R glow (the slot's heat strip only where the slot shows it, 0 on the cowl; peaks at 0.30 like Ember), G structure (cowl edges, grooves and lip, faded with the plate by row .40), B 0 | final |
+| `img/headroom/crucible.webp` | 1024x1536 | WebP | sRGB | none | C: headroom far layer, The Crucible (20) (ART 15.4 R5): the clean plate, smoked glass on titanium ribs fanning up toward the crown like the Ember vault, with the vessel's footprint filled; only the molten surface stays, under the mid's mouth (rows .049 to .054, columns .49 to .56, the only emitter, peak 0.58 linear). Physically lit (Cycles) and graded to the anchor's levels; flat world base from row .33 | final |
+| `img/headroom/crucible_mid.webp` | 1024x1536 | WebP RGBA | sRGB | straight | C: Crucible mid layer: a crucible with the boss's thick titanium lip, tipped 16 degrees on its trunnions (turned 35 degrees, so it reads as tilted), one thin arm up from each trunnion; keyed at 2x with a 1.5 px feather; the molten surface is a hole, so the far layer's heat shows through and stays level as the vessel sways | final |
+| `img/headroom/crucible_glow.png` | 512x768 | PNG RGB | linear | none | C: Crucible masks: R glow (the visible molten surface only, 0 on metal; peaks at 0.40), G structure (lip, trunnions, arms and ribs, faded with the plate by row .33), B 0 | final |
+| `img/headroom/core.webp` | 1024x1536 | WebP | sRGB | none | C: headroom far layer, The Core (30, all three stages): a vault of smoked glass on 12 titanium ribs converging on the core, three forged struts, the smooth contained sun (centre 512,300, 192 px across) in its cup with nothing in front of it (ART 15.4 R4) | final |
+| `img/headroom/core_mid.webp` | 1024x1536 | WebP RGBA | sRGB | straight | C: Core mid layer: the three bevelled titanium petals (models/core.glb geometry, 12-degree gaps), resting parted as the model's stage 3 | final |
+| `img/headroom/core_glow.png` | 512x768 | PNG RGB | linear | none | C: Core masks: R the sun, a filled disc hottest at its centre (peak 0.55), shown only where the petals leave it open; G structure (ribs, struts, cup rim, faded with the plate by row .46), B 0 | final |
 | `icons/icon-180.png` | 180x180 | PNG RGB | sRGB | none | D: apple-touch-icon | final |
 | `icons/icon-192.png` | 192x192 | PNG RGB | sRGB | none | D: manifest icon | final |
 | `icons/icon-512.png` | 512x512 | PNG RGB | sRGB | none | D: manifest icon | final |
@@ -179,11 +177,11 @@ values), so with exposure 1.1 the plate stays under the 0.9 bloom threshold unle
 | Plate | Layers (back to front) | Moving part and pivot (plate pixels, 1024x1536) |
 |---|---|---|
 | ember | `ember.webp` + `ember_glow.png` | none; the crown seam is the only emitter: rows .22 to .27, columns .16 to .85, heat-low at its ends to heat-high's hue at the crown, core about 0.44 linear; ribs and glass fade from row .30 to .46 |
-| blaze | `blaze.webp` + `blaze_glow.png` | none; the conduits are the emitters |
-| whiteheat | `whiteheat.webp` + `whiteheat_glow.png` | none; the louvre gaps are the emitters |
-| stoker | `stoker.webp`, `stoker_mid.webp` + `stoker_glow.png` | iris bbox 207,51 to 816,610; port (hot centre) at 513,306: turn the iris a few degrees about the port, or scale it up 1 to 1.06 to "open" |
-| crucible | `crucible.webp`, `crucible_mid.webp` + `crucible_glow.png` | vessel and arms bbox 26,0 to 997,818; sway about the top centre 512,0 (a degree or two) |
-| core | `core.webp`, `core_mid.webp` + `core_glow.png` | rings bbox 169,96 to 853,652; sphere centre 515,435: the rings part from the sphere by moving the mid layer out and up, or fade it for "shields open" |
+| blaze | `blaze.webp` + `blaze_glow.png` | none; the one molten slug in the live line's upper glass section is the only emitter (rows .02 to .052, nothing hot below the middle collar at row .056); the line fades into the base by row .080; the two risers stay cold |
+| whiteheat | `whiteheat.webp` + `whiteheat_glow.png` | none; the five louvre gaps of the crown oculus are the only emitters: rows .026 to .06, columns .38 to .62 at full heat (pale at heat-high's hue in the middle, gold, then heat-low threads toward the bore wall); ribs and glass fade from row .062 to .42 |
+| stoker | `stoker.webp` + `stoker_glow.png` | none; the mouth slot (centre 512,72, 380 x 6) is the only emitter and sits at row .047, so the current top-anchored fit shows it above the lintel on desktop and phone. No mid layer: the old drive turns the mid about 513,306, which would rock a cowl's slot against the lintel. A cowl mid can be rendered from the same scene for a drive that lifts it (pivot 512,72, no turn) |
+| crucible | `crucible.webp`, `crucible_mid.webp` + `crucible_glow.png` | vessel, trunnions and arms bbox 417,0 to 606,225 (lip rows .022 to .060, so the molten line sits above the lintel at desktop and inside the phone's top band); sway about the top centre 512,0 (a degree or two): the arms leave through the top edge, so the sway reads as the vessel swinging, and the molten surface (far layer, bbox 498,76 to 573,83) stays level under the moving rim |
+| core | `core.webp`, `core_mid.webp` + `core_glow.png` | petals bbox 386,166 to 648,433; sun centre 512,300 (the pivot). The mid rests parted (stage 3, gaps at 60, 180 and 300 degrees); each stage slides every petal in along its own middle (headroom.js `CORE_PART`: stage 1 -20.2 px, stage 2 -10.1, stage 3 0; the first petal's middle at 120 degrees, uv y up), also in lite and reduced motion. The petals never turn: their light is painted in |
 
 - Far layer: where a mid layer exists, its footprint is already filled from the surroundings, so
   the mid can shift (parallax), turn or fade without showing the structure twice.

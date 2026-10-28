@@ -11,7 +11,7 @@
 //   kiln-runtime-v1    three.js from jsDelivr and Google Fonts (CSS and font files), cache-first
 // Navigation always answers with the cached index.html (query strings such as ?level are ignored).
 
-const BUILD = '2026-10-27T2007Z-872021e';
+const BUILD = '2026-10-28T0645Z-c1b154d';
 const CORE = `kiln-core-${BUILD}`;
 const RUNTIME = 'kiln-runtime-v1';
 const CDN = /^https:\/\/(cdn\.jsdelivr\.net\/npm\/three@0\.160\.0\/|fonts\.googleapis\.com\/|fonts\.gstatic\.com\/)/;
@@ -68,7 +68,6 @@ const FILES = [
   'img/headroom/ember_glow.png',
   'img/headroom/stoker.webp',
   'img/headroom/stoker_glow.png',
-  'img/headroom/stoker_mid.webp',
   'img/headroom/whiteheat.webp',
   'img/headroom/whiteheat_glow.png',
   'img/hearth.webp',
@@ -195,11 +194,10 @@ const FILES = [
   'src/ui/screens/settings.js',
   'src/ui/screens/title.js',
   'src/ui/ui.js',
-  'textures/carbon_detail.png',
   'textures/crackle.png',
+  'textures/crackle_mask.png',
   'textures/crackle_n.png',
   'textures/obsidian.png',
-  'textures/obsidian_n.png',
   'vendor/three/0.160.0/LICENSE',
   'vendor/three/0.160.0/PROVENANCE.json',
   'vendor/three/0.160.0/build/three.module.js',

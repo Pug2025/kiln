@@ -9,6 +9,8 @@
 // promise callback) or when any frame is DROPPED against the 60 fps target (an interval over
 // 25 ms at 60 Hz; see tools/qa/lib/probe.mjs). Runs twice by default: lite off, then lite on.
 //
+//   node tools/qa/framegate.mjs                                  the standard release gate: this test on
+//                                                                levels 20, 24 and 30 (item 21 added 30)
 //   node tools/qa/frametime.mjs --level 28 --throttle 4          heaviest level, both lite modes
 //   node tools/qa/frametime.mjs --fixture stress                 300 bricks, 3 balls, 100 embers, Blackout
 //   node tools/qa/frametime.mjs --level 1 --seconds 10 --lite off --device desktop

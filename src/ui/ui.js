@@ -143,15 +143,21 @@ export function createUI(root, ctx = {}) {
       const el = SCREENS.card(data, { fieldRect });
       cardLayer.appendChild(el);
       card = el;
-      // place it in an empty band of the field (above or under the formation): one layout read
-      // when the card appears, never per frame
-      if (data.bands && fieldRect.h > 0) {
-        const fieldY = fieldRect.fieldY || 0;
-        const fieldH = fieldRect.fieldH || 1080;
-        const units = (el.offsetHeight * fieldH) / fieldRect.h;
-        el.style.setProperty('--card-fy', String((cardCentre(data.bands, units, fieldY, fieldY + fieldH) - fieldY) / fieldH));
-      }
-      requestAnimationFrame(() => el.classList.add('in'));
+      // Place it in an empty band of the field (above or under the formation) with one layout read
+      // as it fades in, never per frame. It is read in the next frame's first callback, after the
+      // browser has laid this frame out, so it costs no layout of its own; read here it forced
+      // one for the whole page in the middle of a world change (item 23). A card closed before
+      // then is never measured. It shows at opacity 0 until 'in', so nothing moves on screen.
+      requestAnimationFrame(() => {
+        if (card !== el) return;
+        if (data.bands && fieldRect.h > 0) {
+          const fieldY = fieldRect.fieldY || 0;
+          const fieldH = fieldRect.fieldH || 1080;
+          const units = (el.offsetHeight * fieldH) / fieldRect.h;
+          el.style.setProperty('--card-fy', String((cardCentre(data.bands, units, fieldY, fieldY + fieldH) - fieldY) / fieldH));
+        }
+        el.classList.add('in');
+      });
     },
 
     /** Live play wants the HUD; any glass screen hides it. */
@@ -195,10 +201,12 @@ export function createUI(root, ctx = {}) {
       readSafeArea(safe);
       hudLayout(window.innerWidth, window.innerHeight, rect, safe, L);
       hud.layout(L);
-      root.style.setProperty('--field-x', `${rect.x}px`);
-      root.style.setProperty('--field-y', `${rect.y}px`);
-      root.style.setProperty('--field-w', `${rect.w}px`);
-      root.style.setProperty('--field-h', `${rect.h}px`);
+      // only the level card reads the field box: set it on the card layer, so a new box (a world
+      // in another field mode) restyles the card and not the whole interface (item 23)
+      cardLayer.style.setProperty('--field-x', `${rect.x}px`);
+      cardLayer.style.setProperty('--field-y', `${rect.y}px`);
+      cardLayer.style.setProperty('--field-w', `${rect.w}px`);
+      cardLayer.style.setProperty('--field-h', `${rect.h}px`);
       if (cur) cur.nav.refresh();
     },
 

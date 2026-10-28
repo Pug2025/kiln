@@ -16,6 +16,7 @@
 # Build machinery
 .worktrees/
 .merge-lock
+.heavy-lock/
 assets/generated/
 
 # OS / editor

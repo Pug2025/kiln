@@ -104,6 +104,11 @@ export function createBricks(scene, M) {
   }
 
   let cur = shape('slab');
+  // The ring-mode shape is built here too, not on the first ring world (item 21, Oct 27). Built
+  // then, it cost the frame that ends The Core's stage 2 about 8.6 ms (Pixel 7, CPU 4x: 20 ms in
+  // all, over the frame budget), and its meshes came after the renderer's list of instanced pools,
+  // so an empty one was never hidden and still cost a draw setup every ring frame.
+  shape('square');
   let mode = 'bottom';
   let world = null;
 
@@ -131,6 +136,10 @@ export function createBricks(scene, M) {
   let clearT0 = -1;
 
   // scratch
+  // A brick's placement (field x, y, w, h and a scale) goes through `place`, not call arguments:
+  // V8 boxes every fractional argument of a call it does not inline, and on boss levels the ring
+  // bricks are placed every frame (item 21: about 0.4 KB a frame on The Core).
+  const place = new Float64Array(5);
   const m4 = new THREE.Matrix4();
   const pos = new THREE.Vector3();
   const scl = new THREE.Vector3();
@@ -169,23 +178,28 @@ export function createBricks(scene, M) {
     cur = next;
   }
 
-  /** Brick transform into m4 (interpolated when it moves); returns false when not drawable. */
+  /** Brick transform into m4 (interpolated when it moves). */
   function compose(i, alpha, sMul) {
     const B = world.bricks;
     const moving = (B.flags[i] & (BF.MOVING | BF.FALLING)) !== 0;
-    const x = moving ? B.px[i] + (B.x[i] - B.px[i]) * alpha : B.x[i];
-    const y = moving ? B.py[i] + (B.y[i] - B.py[i]) * alpha : B.y[i];
-    composeAt(x, y, B.w[i], B.h[i], sMul);
+    place[0] = moving ? B.px[i] + (B.x[i] - B.px[i]) * alpha : B.x[i];
+    place[1] = moving ? B.py[i] + (B.y[i] - B.py[i]) * alpha : B.y[i];
+    place[2] = B.w[i];
+    place[3] = B.h[i];
+    place[4] = sMul;
+    composePlace();
   }
 
-  function composeAt(x, y, w, h, sMul) {
-    pos.set(x - HW, HH - y, 0);
+  /** m4 from place (field x, y, w, h and a scale). */
+  function composePlace() {
+    const sMul = place[4];
+    pos.set(place[0] - HW, HH - place[1], 0);
     if (mode === 'left') {
       qRot.copy(qLeft);
-      scl.set((h / cur.cellW) * sMul, (w / cur.cellH) * sMul, sMul);
+      scl.set((place[3] / cur.cellW) * sMul, (place[2] / cur.cellH) * sMul, sMul);
     } else {
       qRot.copy(qId);
-      scl.set((w / cur.cellW) * sMul, (h / cur.cellH) * sMul, sMul);
+      scl.set((place[2] / cur.cellW) * sMul, (place[3] / cur.cellH) * sMul, sMul);
     }
     m4.compose(pos, qRot, scl);
   }
@@ -269,8 +283,11 @@ export function createBricks(scene, M) {
     }
   }
 
-  /** Extra heat from hits, re-forming and the level-clear sweep; a blocked core dips. */
-  function extraHeat(i, y, t) {
+  /**
+   * Extra heat from hits, re-forming and the level-clear sweep; a blocked core dips. Reads the
+   * brick's y itself: passed in, it cost V8 a boxed number per brick per frame (item 21).
+   */
+  function extraHeat(i, t) {
     const core = isBossCore(world, i);
     if (core && coreProtected(world)) return 0;
     let h = 0;
@@ -282,7 +299,7 @@ export function createBricks(scene, M) {
     }
     const ks = (t - spawnT[i]) / LOOK.REFORM_SETTLE_S;
     if (ks >= 0 && ks < 1) h += LOOK.REFORM_GLOW * (1 - ks);
-    if (clearT0 >= 0) h += sweepHeat(y, t);
+    if (clearT0 >= 0) h += sweepHeat(world.bricks.y[i], t);
     return h;
   }
 
@@ -413,7 +430,7 @@ export function createBricks(scene, M) {
             setSlot(gr, s, gr.noCore[s]);
             moved = true;
           }
-          if (hb) hb[s] = baseHeat(i, t) + extraHeat(i, B.y[i], t);
+          if (hb) hb[s] = baseHeat(i, t) + extraHeat(i, t);
         }
         // ruptures after the live slots
         let n = gr.live;
@@ -428,7 +445,9 @@ export function createBricks(scene, M) {
             continue;
           }
           const kb = el / dur;
-          composeAt(r.x, r.y, r.w, r.h, r.burn ? 1 - 0.85 * kb * kb : 1);
+          place[0] = r.x; place[1] = r.y; place[2] = r.w; place[3] = r.h;
+          place[4] = r.burn ? 1 - 0.85 * kb * kb : 1;
+          composePlace();
           setSlot(gr, n, false);
           if (hb) hb[n] = r.burn ? r.heat + LOOK.BURN_HEAT * Math.min(1, kb * 1.6) : -(1 + r.heat + LOOK.RUPTURE_FLASH * Math.min(1, el / 0.08));
           n++;
