@@ -16,7 +16,9 @@ const DROP_FACT_MS = 2600;
 
 /**
  * @param {HTMLElement} root  the #ui layer
- * @param {{onPause?:() => void, onMute?:() => void}} [opts]  the two HUD buttons
+ * @param {{onPause?:() => void, onMute?:() => void, pulled?:() => boolean, onPulled?:() => void}} [opts]
+ *   the two HUD buttons; `pulled` says whether this player has used Pull before (saved help), and
+ *   `onPulled` runs once, the first time they do, so the Pull tip under HEAT gives way to a fact.
  */
 export function createHud(root, opts = {}) {
   const el = document.createElement('div');
@@ -86,6 +88,7 @@ export function createHud(root, opts = {}) {
     bossSegs: -1, bossHp: -1, bossId: '', bossStage: -1, bossFlash: false, bossCooled: null,
   };
   const peak = new Float32Array(DROP_COUNT); // longest ms seen per effect, for its line
+  let pulledOnce = null; // read from opts.pulled when a world starts (null = not read yet)
   let scale = 1;
   let narrow = false;
 
@@ -93,6 +96,7 @@ export function createHud(root, opts = {}) {
     last.score = -1; last.mult = -1; last.level = -1; last.name = null; last.lives = -1; last.last = null;
     last.heat = -1; last.heatOn = null; last.ready = null; last.clock = -1; last.timed = null;
     last.pulling = null;
+    pulledOnce = null;
     last.boss = -1; last.bossOn = null; last.shield = -1; last.vent = -1; last.ventPeak = 0;
     last.fxOn.fill(-1); last.fxQ.fill(-1); last.fxN.fill(-1);
     peak.fill(0);
@@ -104,7 +108,8 @@ export function createHud(root, opts = {}) {
     last.dropUntil = 0; last.dropSeen = 0;
     k.dropFact.hidden = true;
     blocks.heat.classList.remove('drop-fact-on');
-    last.bossLabel = ''; last.bossFact = ''; last.bossAria = ''; last.laserLabel = '';
+    // null, not '': an empty fact (no line) must still replace the last world's text
+    last.bossLabel = ''; last.bossFact = null; last.bossAria = ''; last.laserLabel = '';
     last.contextOn = null;
     last.bossSegs = -1; last.bossHp = -1; last.bossId = ''; last.bossStage = -1; last.bossCooled = null;
     k.boss.classList.remove('hit-a', 'hit-b', 'cooled');
@@ -181,7 +186,7 @@ export function createHud(root, opts = {}) {
       if (!caught && (last.dropSeen & bit)) return;
       last.dropSeen |= bit;
       k.dropName.textContent = `${FX_LABEL[kind]} ${caught ? 'caught' : 'drop'}`;
-      k.dropEffect.textContent = kind === DROP.WIDE ? 'Longer paddle'
+      k.dropEffect.textContent = kind === DROP.WIDE ? 'Wider paddle'
         : caught ? (count > 0 ? `${count} extra ${count === 1 ? 'ball' : 'balls'}` : 'No extra balls') : 'Extra balls';
       k.dropFact.hidden = false;
       blocks.heat.classList.add('drop-fact-on');
@@ -232,6 +237,7 @@ export function createHud(root, opts = {}) {
       const run = world.run;
       const econ = world.econ;
       const lvl = world.level;
+      if (pulledOnce === null) pulledOnce = !!(opts.pulled && opts.pulled());
 
       const score = run.score;
       if (score !== last.score) {
@@ -294,7 +300,8 @@ export function createHud(root, opts = {}) {
           last.pulling = pulling;
           k.heatLabel.textContent = pulling ? 'Pull' : 'Heat';
           k.heatRow.classList.toggle('pulling', pulling);
-          k.heatRow.setAttribute('aria-label', pulling ? 'Pull active; using HEAT' : 'HEAT');
+          k.heatRow.setAttribute('aria-label', pulling ? 'Pull active · using HEAT' : 'HEAT');
+          if (pulling && !pulledOnce) { pulledOnce = true; if (opts.onPulled) opts.onPulled(); }
         }
         const h = Math.round((econ.heat / (econ.heatMax || 100)) * 100);
         if (h !== last.heat) { last.heat = h; k.heat.style.transform = `scaleX(${h / 100})`; }
@@ -340,8 +347,11 @@ export function createHud(root, opts = {}) {
         }
       }
       const won = lvl.total > 0 && lvl.remaining <= 0;
-      const fact = bossOn && !won ? bossFact(world) : resourceFact(world, coarse.matches);
+      const fact = bossOn && !won ? bossFact(world) : resourceFact(world, coarse.matches, pulledOnce);
       if (fact !== last.bossFact) { last.bossFact = fact; k.bossFact.textContent = fact; }
+      // The fact row keeps its place on every level, also while its text is empty (no HEAT yet, a
+      // bought Shield), so the power labels under it never move when a fact comes or goes: a Pull
+      // press, the level-end count. Only the opening power explanation, drawn over it, hides it.
       const contextOn = !last.dropUntil;
       if (contextOn !== last.contextOn) {
         last.contextOn = contextOn; k.bossFact.hidden = !contextOn;
@@ -390,7 +400,7 @@ function bossFact(world) {
   if (boss.data?.guard) return 'Core cooled: no damage';
   if (boss.id !== 'stoker') return boss.id === 'core' && boss.phase === 3
     ? 'Hit core through both gaps' : 'Hit core through the gap';
-  if (boss.data?.jawRepairPending) return 'Jaw repairing; damage kept';
+  if (boss.data?.jawRepairPending) return 'Jaw repairing · hits kept';
   const B = world.bricks;
   if (B) {
     // An outer jaw opening is not a route to the core. Only a missing plate directly below the

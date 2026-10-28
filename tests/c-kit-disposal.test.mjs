@@ -7,7 +7,11 @@ const stub = await import(stubURL);
 const { loadKit } = await import('../src/render/kit.js');
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
 const flush = async () => { for (let n = 0; n < 10; n++) await Promise.resolve(); };
-const until = async predicate => { for (let n = 0; n < 30 && !predicate(); n++) await new Promise(setImmediate); assert.ok(predicate(), 'expected asynchronous loader boundary becomes available'); };
+// The model path waits on import('three/addons/...'), which the resolve hook above serves from
+// Node's loader thread: real time, not a fixed number of event-loop turns. Under the gate's
+// parallel workers 30 turns were sometimes too few (2 of 4 full runs on main d59935a), so wait by
+// the clock instead, still failing if the boundary never comes.
+const until = async predicate => { const end = Date.now() + 5000; while (!predicate() && Date.now() < end) await new Promise(setImmediate); assert.ok(predicate(), 'expected asynchronous loader boundary becomes available'); };
 const image = name => ({ name, closes: 0, close() { this.closes++; } });
 const disposable = name => ({ name, disposals: 0, dispose() { this.disposals++; } });
 function fixture(manifest, { bitmap = false, fetchResponse = null, textResponse = null } = {}) {

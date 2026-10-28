@@ -4,6 +4,8 @@ const DEFAULT_SCHEDULER = {
   now: () => performance.now(),
   setTimeout: (fn, ms) => setTimeout(fn, ms),
   clearTimeout: id => clearTimeout(id),
+  // Page visibility for the deadline; null where there is no document (the deadline then counts all time).
+  document: typeof document === 'undefined' ? null : document,
 };
 
 function cancelled(reason) {
@@ -35,6 +37,18 @@ export function submitShaderPreparation(renderer, scene, camera, options = {}) {
   let native = null, timer = null, settled = false, programs = [], nativePrograms = [], programSet = new Set(), materials = [];
   let parallel = false, completionStatus = null, submissionMs = 0, polls = 0, resolveDone, rejectDone;
   const done = new Promise((resolve, reject) => { resolveDone = resolve; rejectDone = reject; });
+  // The deadline counts only time the page can be seen. A hidden page (a background tab, a phone
+  // switched to another app) has its timers throttled, frozen or suspended, so a poll can run long
+  // after the driver finished: that wait is not a stalled compile. Hiding holds the deadline and
+  // showing resumes it, as the startup watchdog does. Without a document every moment counts.
+  let page = scheduler.document ?? null, hiddenSince = page?.visibilityState === 'hidden' ? started : null, hiddenMs = 0;
+  function visibilityChanged() {
+    const time = now();
+    if (page?.visibilityState === 'hidden') { if (hiddenSince === null) hiddenSince = time; }
+    else if (hiddenSince !== null) { hiddenMs += time - hiddenSince; hiddenSince = null; }
+  }
+  function hiddenTotal(time) { return hiddenMs + (hiddenSince === null ? 0 : time - hiddenSince); }
+  function visibleNow() { const time = now(); return time - hiddenTotal(time); }
 
   function finish(error, value) {
     if (settled) return false;
@@ -45,6 +59,8 @@ export function submitShaderPreparation(renderer, scene, camera, options = {}) {
       timer = null;
     }
     try { signal?.removeEventListener('abort', onAbort); } catch (e) { cleanupError ??= e; }
+    try { page?.removeEventListener?.('visibilitychange', visibilityChanged); } catch (e) { cleanupError ??= e; }
+    page = null;
     // Results transfer the successful program array; obsolete jobs retain no captured objects.
     programSet?.clear();
     programs = nativePrograms = programSet = materials = null;
@@ -61,16 +77,16 @@ export function submitShaderPreparation(renderer, scene, camera, options = {}) {
     if (isDisposed()) { finish(cancelled('disposed')); return false; }
     if (getEpoch() !== epoch) { finish(cancelled('epoch')); return false; }
     if (native?.isContextLost()) { finish(cancelled('context-lost')); return false; }
-    if (now() >= deadline) {
-      const error = new Error('Shader preparation completion deadline exceeded');
-      error.name = 'TimeoutError'; error.code = 'SHADER_PREPARATION_TIMEOUT';
-      finish(error); return false;
-    }
     return true;
+  }
+  function timedOut() {
+    const error = new Error('Shader preparation completion deadline exceeded');
+    error.name = 'TimeoutError'; error.code = 'SHADER_PREPARATION_TIMEOUT';
+    finish(error);
   }
   function schedule(delay) {
     if (!current()) return;
-    timer = later(poll, Math.min(delay, Math.max(0, deadline - now())));
+    timer = later(poll, Math.min(delay, Math.max(0, deadline - visibleNow())));
   }
   function capturedCurrent(index) {
     if (!current()) return false;
@@ -84,6 +100,9 @@ export function submitShaderPreparation(renderer, scene, camera, options = {}) {
     timer = null;
     try {
       if (!current()) return;
+      // Decided before asking the driver: a poll at or after the deadline (the deadline reached, or a
+      // poll that ran late after a long task) still asks once, and times out only if a program is pending.
+      const last = visibleNow() >= deadline;
       polls++;
       let allReady = true;
       for (let index = 0; index < programs.length; index++) {
@@ -91,12 +110,13 @@ export function submitShaderPreparation(renderer, scene, camera, options = {}) {
         if (parallel && !native.getProgramParameter(nativePrograms[index], completionStatus)) allReady = false;
         if (!capturedCurrent(index)) return;
       }
-      if (!allReady) { schedule(pollMs); return; }
+      if (!allReady) { if (last) timedOut(); else schedule(pollMs); return; }
       // A later program query may have invalidated an earlier captured material/program.
       for (let index = 0; index < programs.length; index++) if (!capturedCurrent(index)) return;
       if (!current()) return;
+      const time = now();
       finish(null, { programs, materials, capability: parallel ? 'parallel' : 'synchronous-fallback',
-        submissionMs, completionMs: now() - started, polls });
+        submissionMs, completionMs: time - started, hiddenMs: hiddenTotal(time), polls });
     } catch (error) { finish(error); }
   }
   function capture(program) {
@@ -107,6 +127,7 @@ export function submitShaderPreparation(renderer, scene, camera, options = {}) {
   try {
     if (!current()) return job;
     signal?.addEventListener('abort', onAbort, { once: true });
+    page?.addEventListener?.('visibilitychange', visibilityChanged);
     if (!current()) return job;
     native = renderer.getContext();
     if (!current()) return job;

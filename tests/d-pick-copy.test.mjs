@@ -54,6 +54,13 @@ test('Mod pick and selected wall card use the shared player copy', () => {
     assert.deepEqual(el.querySelectorAll('.fact').map((node) => node.textContent), MODS.map((mod) => mod.fact));
     const trade = twistsFor(14)[0].label;
     const selected = card({ n: 14, door: trade });
-    assert.equal(selected.querySelector('.adds').textContent, `Wall ${trade}`);
+    assert.equal(selected.querySelector('.adds').textContent, trade, 'the door text alone, no label before it');
+    // first-use controls: one line each in the same fact line
+    const help = card({ n: 7, name: 'Outposts', hint: ['Line one.', 'Line two.'], controls: true });
+    const sub = help.querySelector('.sub');
+    assert.equal(sub.querySelectorAll('br').length, 1);
+    assert.equal(sub.textContent, 'Line one.Line two.');
+    assert.equal(card({ n: 2, hint: 'One fact.' }).querySelector('.sub').textContent, 'One fact.');
+    assert.equal(card({ n: 13, hint: '' }).querySelector('.sub'), null, 'an empty hint draws no line');
   } finally { dom.restore(); }
 });

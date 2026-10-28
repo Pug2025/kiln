@@ -17,12 +17,12 @@ export const MODS = Object.freeze([
   { id: MOD.SHIELD, key: 'shield', name: 'Shield', fact: 'Start each level with a shield.' },
   { id: MOD.SLOW_START, key: 'slow-start', name: 'Slow start', fact: 'Each launch slows balls for 10 seconds.' },
   { id: MOD.DOUBLE_DROPS, key: 'double-drops', name: 'Rich walls', fact: 'More powers drop.' },
-  { id: MOD.PIERCE, key: 'pierce', name: 'Pierce', fact: 'Balls pierce a brick on launch or paddle hits.' },
-  { id: MOD.LONG_CATCH, key: 'long-catch', name: 'Long catch', fact: 'Catch lasts for 35 seconds.' },
+  { id: MOD.PIERCE, key: 'pierce', name: 'Pierce', fact: 'Balls go through 1 brick after a paddle hit.' },
+  { id: MOD.LONG_CATCH, key: 'long-catch', name: 'Long Catch', fact: 'Catch lasts for 35 seconds.' },
   { id: MOD.CHEAP_PULL, key: 'cheap-pull', name: 'Cheap Pull', fact: 'Pull drains HEAT more slowly.' },
-  { id: MOD.BURST, key: 'burst', name: 'Burst', fact: 'Some bricks drop double embers.' },
+  { id: MOD.BURST, key: 'burst', name: 'Ember burst', fact: 'Some bricks drop double embers.' },
   { id: MOD.MAGNET, key: 'magnet', name: 'Magnet', fact: 'Nearby embers drift to the paddle.' },
-  { id: MOD.COMBO_FLOOR, key: 'combo-floor', name: 'Steady combo', fact: 'Your multiplier never drops below ×2.' },
+  { id: MOD.COMBO_FLOOR, key: 'combo-floor', name: 'Steady ×2', fact: 'Your multiplier never drops below ×2.' },
   { id: MOD.MORE_LASERS, key: 'more-lasers', name: 'More shots', fact: 'Laser drops refill to 20 shots.' },
 ].map(Object.freeze));
 

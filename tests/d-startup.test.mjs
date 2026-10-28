@@ -23,19 +23,21 @@ class Element extends Target {
   append(...nodes) { this.children.push(...nodes); }
   focus() { this.focused = true; }
 }
-function page({ online = true, stored = new Map(), denied = false, body = true, loadMain = async () => ({ boot: async () => {} }) } = {}) {
+function page({ online = true, stored = new Map(), denied = false, body = true, visibility, loadMain = async () => ({ boot: async () => {} }) } = {}) {
   const doc = new Target(), win = new Target(), timers = new Map();
-  let timerId = 0, reloads = 0;
+  let timerId = 0, reloads = 0, clock = 0;
   const links = [];
   doc.baseURI = 'https://kiln.test/game/?level=23&seed=1';
   doc.readyState = 'loading';
+  if (visibility) doc.visibilityState = visibility; // left out: a browser without the Page Visibility API
+  win.performance = { now: () => clock };
   doc.body = body ? new Element('body') : null;
   doc.createElement = (tag) => new Element(tag);
   doc.querySelectorAll = (selector) => links.filter((link) => selector.split(',').some((part) => link.hasAttribute(/\[([^\]]+)\]/.exec(part)[1])));
   doc.getElementById = (id) => doc.body?.children.find((node) => node.id === id) || null;
   win.navigator = { onLine: online, serviceWorker: new Target() };
   win.location = { reload() { reloads++; } };
-  win.setTimeout = (fn, ms) => { const id = ++timerId; timers.set(id, { fn, ms }); return id; };
+  win.setTimeout = (fn, ms) => { const id = ++timerId; timers.set(id, { fn, ms, due: clock + ms }); return id; };
   win.clearTimeout = (id) => timers.delete(id);
   win.sessionStorage = {
     getItem(k) { if (denied) throw new Error('Storage denied'); return stored.get(k) || null; },
@@ -47,6 +49,20 @@ function page({ online = true, stored = new Map(), denied = false, body = true, 
     api, win, doc, stored, timers,
     link(path, kind = 'module') { const el = new Element('link'); el.href = new URL(path, doc.baseURI).href; el.setAttribute(`data-kiln-${kind}`, ''); links.push(el); return el; },
     expire(ms) { for (const [id, timer] of [...timers]) if (timer.ms === ms) { timers.delete(id); timer.fn(); } },
+    /** Let `ms` pass on the page clock, firing every timer that falls due, in order (a hidden tab fires them too). */
+    pass(ms) {
+      const end = clock + ms;
+      for (;;) {
+        let next = null;
+        for (const [id, timer] of timers) if (timer.due <= end && (!next || timer.due < next[1].due)) next = [id, timer];
+        if (!next) break;
+        clock = Math.max(clock, next[1].due);
+        timers.delete(next[0]);
+        next[1].fn();
+      }
+      clock = end;
+    },
+    show(state) { doc.visibilityState = state; doc.fire('visibilitychange'); },
     get reloads() { return reloads; },
     get box() { return doc.getElementById('startup-recovery'); },
   };
@@ -217,4 +233,142 @@ test('post-ready cache warnings cannot evict the pinned fatal failure and succes
   assert.equal(recovered.api.snapshot().episode.failure.url, 'https://kiln.test/game/src/render/post.js');
   const laterPage = page({ stored });
   assert.equal(laterPage.api.snapshot().episode.recovery.stage, 'ready', 'the completed episode survives a later navigation');
+});
+
+// A boot like main.js: it reaches 'first-frame' and is ready only on its first drawn frame, which a
+// hidden page never gets. `frame` delivers that first frame (the page has come forward).
+function bootToFirstFrame() {
+  const boot = { frame: null };
+  boot.loadMain = async () => ({ boot: async (api) => { api.stage('first-frame'); boot.frame = () => api.ready(); } });
+  return boot;
+}
+
+test('a page hidden for 60 s holds the startup deadline and boots when it comes forward', async () => {
+  const b = bootToFirstFrame(), p = page({ visibility: 'hidden', loadMain: b.loadMain });
+  await p.api.start();
+  assert.equal(p.api.snapshot().stage, 'first-frame', 'boot runs while hidden and waits for its first frame');
+  assert.equal(p.api.snapshot().deadlineHeld, true);
+  assert.equal(p.timers.size, 0, 'no startup deadline runs while hidden');
+  for (let s = 0; s < 60; s++) p.pass(1000); // a background tab still runs its timers
+  let snap = p.api.snapshot();
+  assert.equal(snap.failed, false);
+  assert.equal(snap.deadlineMs, 20000, 'none of the hidden minute counted');
+  assert.ok(!snap.records.some((r) => r.kind === 'timeout'));
+  assert.equal(p.box, null);
+  assert.equal(p.reloads, 0);
+  assert.equal(p.stored.has('kiln.startup.retry'), false, 'no automatic retry was spent');
+  p.show('visible');
+  assert.equal(p.api.snapshot().deadlineHeld, false, 'the deadline runs again once the page can be seen');
+  p.pass(16);
+  b.frame();
+  snap = p.api.snapshot();
+  assert.equal(snap.ready, true);
+  assert.equal(snap.failed, false);
+  assert.equal(p.timers.size, 0);
+  p.show('hidden'); p.show('visible'); p.pass(60000);
+  assert.equal(p.timers.size, 0, 'visibility after ready arms nothing');
+  assert.equal(p.reloads, 0);
+  assert.equal(p.box, null);
+});
+
+test('only visible time counts: 5 s shown, 10 min hidden, then the rest of the same 20 s', async () => {
+  const b = bootToFirstFrame(), p = page({ visibility: 'visible', loadMain: b.loadMain });
+  await p.api.start();
+  p.pass(5000);
+  p.show('hidden');
+  p.pass(600000);
+  assert.equal(p.api.snapshot().failed, false);
+  assert.equal(p.api.snapshot().deadlineMs, 15000);
+  p.show('visible');
+  p.show('visible'); // a repeated event does not restart or double the deadline
+  assert.equal(p.timers.size, 1);
+  p.pass(14999);
+  assert.equal(p.api.snapshot().failed, false);
+  p.pass(1);
+  const snap = p.api.snapshot();
+  assert.equal(snap.failed, true, 'a stall fails after 20 s of visible time in total');
+  assert.equal(snap.records.find((r) => r.kind === 'timeout').stage, 'first-frame');
+});
+
+test('a stalled boot while visible still fails at 20 s, retries once, then offers the manual retry', async () => {
+  const stored = new Map(), b = bootToFirstFrame();
+  const p = page({ stored, visibility: 'visible', loadMain: b.loadMain });
+  await p.api.start();
+  p.pass(19999);
+  assert.equal(p.api.snapshot().failed, false);
+  assert.equal(p.box, null);
+  p.pass(1);
+  const snap = p.api.snapshot();
+  assert.equal(snap.failed, true);
+  const timeout = snap.records.find((r) => r.kind === 'timeout');
+  assert.equal(timeout.message, 'Startup timed out');
+  assert.equal(timeout.stage, 'first-frame');
+  assert.equal(snap.deadlineMs, 0);
+  assert.equal(p.box.children[0].textContent, 'Kiln could not load.');
+  assert.equal(stored.get('kiln.startup.retry'), '1');
+  p.show('hidden'); p.show('visible');
+  p.pass(200);
+  assert.equal(p.reloads, 1, 'the one automatic retry');
+  const next = page({ stored, visibility: 'visible', loadMain: bootToFirstFrame().loadMain });
+  await next.api.start();
+  next.pass(19999);
+  assert.equal(next.api.snapshot().failed, false);
+  next.pass(1);
+  assert.equal(next.api.snapshot().failed, true, 'the retried document has the same deadline');
+  next.pass(60000);
+  assert.equal(next.reloads, 0, 'no second automatic reload');
+  next.box.children[1].fire('click');
+  assert.equal(next.reloads, 1, 'manual retry still works');
+});
+
+test('the automatic retry document may load hidden and still boots when it comes forward', async () => {
+  const stored = new Map();
+  const first = page({ stored, visibility: 'visible', loadMain: bootToFirstFrame().loadMain });
+  await first.api.start();
+  first.pass(20200);
+  assert.equal(first.reloads, 1);
+  const b = bootToFirstFrame(), retried = page({ stored, visibility: 'hidden', loadMain: b.loadMain });
+  await retried.api.start();
+  retried.pass(60000);
+  assert.equal(retried.api.snapshot().failed, false);
+  assert.equal(retried.box, null);
+  retried.show('visible');
+  retried.pass(16);
+  b.frame();
+  const snap = retried.api.snapshot();
+  assert.equal(snap.ready, true);
+  assert.equal(snap.episode.failure.kind, 'timeout');
+  assert.equal(snap.episode.recovery.stage, 'ready');
+  assert.equal(stored.has('kiln.startup.retry'), false, 'a good start clears the retry for next time');
+});
+
+test('a shader-preparation timeout or a lost context during boot gets the one automatic retry; other renderer errors do not', async () => {
+  const graphicsError = (kind) => kind === 'timeout'
+    ? Object.assign(new Error('Shader preparation completion deadline exceeded'), { name: 'TimeoutError', code: 'SHADER_PREPARATION_TIMEOUT' })
+    : Object.assign(new Error('Shader preparation cancelled: context-lost'), { name: 'AbortError', code: 'SHADER_PREPARATION_ABORTED' });
+  for (const kind of ['timeout', 'context-lost']) {
+    const stored = new Map();
+    const boot = () => ({ boot: (api) => api.task('renderer', () => { throw graphicsError(kind); }) });
+    const p = page({ stored, visibility: 'visible', loadMain: async () => boot() });
+    await p.api.start();
+    const snap = p.api.snapshot();
+    assert.equal(snap.failed, true);
+    const failure = snap.records.find((r) => r.kind === 'entry');
+    assert.equal(failure.stage, 'renderer');
+    assert.equal(failure.message, graphicsError(kind).message);
+    assert.equal(stored.get('kiln.startup.retry'), '1');
+    p.pass(200);
+    assert.equal(p.reloads, 1, `${kind}: one automatic reload`);
+    const next = page({ stored, visibility: 'visible', loadMain: async () => boot() });
+    await next.api.start();
+    next.pass(60000);
+    assert.equal(next.reloads, 0, `${kind}: never a second automatic reload`);
+    next.box.children[1].fire('click');
+    assert.equal(next.reloads, 1, `${kind}: manual retry still works`);
+  }
+  const other = page({ visibility: 'visible', loadMain: async () => ({ boot: (api) => api.task('renderer', () => { throw new Error('Shader link failed: bad program'); }) }) });
+  await other.api.start();
+  other.pass(200);
+  assert.equal(other.api.snapshot().failed, true);
+  assert.equal(other.reloads, 0, 'a broken shader is not retried automatically');
 });

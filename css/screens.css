@@ -150,12 +150,26 @@ kbd {
 }
 .toast.in { opacity: 1; }
 
-/* level card: text on the live world (content layer, like the HUD: no panel, no blur), in an empty
-   band of the field (ui.js sets --card-fy), takes no input. A soft dark shadow keeps it legible
-   over bright headroom art. Reduce transparency (R20) gives it the void-75% fill. */
+/* level card: text on the live world (content layer, like the HUD: no panel, no blur), in the
+   chamber's open band under the formation, never across the lintel (ui.js sets --card-fy, and in
+   horizontal mode the room --card-ax to --card-bx, fractions of the field box, less 8 px of air
+   each side), takes no input.
+   It keeps 16 px inside the field box. A soft dark shadow keeps it legible over bright art.
+   On a field under about 360 px wide (320 px phones) its padding, title, adds line and kicker
+   tracking step down with the field, so it covers less of the formation; desktop and 390 px
+   phones are unchanged. A kicker too long for the card (The Core's stage cards on a 320 px phone)
+   puts its tag on a second line rather than run past the card.
+   Reduce transparency (R20) gives it the void-75% fill. */
 .card {
-  position: fixed; left: calc(var(--field-x, 0px) + var(--field-w, 100vw) / 2); top: calc(var(--field-y, 0px) + var(--field-h, 100vh) * var(--card-fy, .42));
-  width: min(320px, calc(var(--field-w, 100vw) - 32px)); padding: 16px 20px 18px; pointer-events: none;
+  --card-air: 8px; /* ui.js CARD_AIR: the horizontal room keeps it too (paddle track, far wall) */
+  --card-l: max(16px, calc(var(--field-w, 100vw) * var(--card-ax, 0) + var(--card-air)));
+  --card-r: min(calc(var(--field-w, 100vw) - 16px), calc(var(--field-w, 100vw) * var(--card-bx, 1) - var(--card-air)));
+  --card-title: clamp(24px, calc(var(--field-w, 100vw) * .1 - 4px), 32px);
+  --card-adds: clamp(14px, calc(var(--field-w, 100vw) * .05 - 2px), 16px);
+  --card-track: clamp(1.8px, calc(var(--field-w, 100vw) * .012 - 1px), 3.36px); /* the kicker's .28em at 12 px */
+  position: fixed; left: calc(var(--field-x, 0px) + (var(--card-l) + var(--card-r)) / 2); top: calc(var(--field-y, 0px) + var(--field-h, 100vh) * var(--card-fy, .42));
+  width: min(320px, calc(var(--card-r) - var(--card-l))); pointer-events: none;
+  padding: clamp(10px, calc(var(--field-w, 100vw) * .05 - 2px), 16px) clamp(14px, calc(var(--field-w, 100vw) * .06 - 2px), 20px) clamp(12px, calc(var(--field-w, 100vw) * .05), 18px);
   border-radius: var(--radius);
   text-shadow: 0 0 10px rgba(7, 8, 10, .75), 0 1px 2px rgba(7, 8, 10, .9);
   opacity: 0; transform: translate(-50%, -50%) scale(.98);
@@ -163,11 +177,12 @@ kbd {
 }
 .card.in { opacity: 1; transform: translate(-50%, -50%); }
 .card.out { opacity: 0; transform: translate(-50%, -50%); transition: opacity 120ms var(--ease); }
-.card > .kicker { padding: 0; margin: 0; }
+.card.out.cut { transition: none; } /* a launch: gone at once, the ball never flies under it */
+.card > .kicker { padding: 0; margin: 0; flex-wrap: wrap; row-gap: 8px; letter-spacing: var(--card-track); }
 .card > .kicker::after { box-shadow: 0 0 4px rgba(7, 8, 10, .8); }
 .card .kicker .tag { color: var(--w70); }
-.card .title { margin-top: 12px; font: 600 32px/1.05 var(--font-display); letter-spacing: -.01em; color: var(--text); }
-.card .adds { margin-top: 10px; font: 400 16px/1.35 var(--font-body); color: var(--w70); }
+.card .title { margin-top: 12px; font: 600 var(--card-title)/1.05 var(--font-display); letter-spacing: -.01em; color: var(--text); }
+.card .adds { margin-top: 10px; font: 400 var(--card-adds)/1.35 var(--font-body); color: var(--w70); }
 .card .adds span { font: 500 12px/1 var(--font-body); letter-spacing: .25em; text-transform: uppercase; color: var(--w55); margin-right: 6px; }
 .card .sub { padding: 0; margin-top: 8px; font: 400 14px/1.4 var(--font-body); color: var(--w50); }
 .card.controls .sub { color: var(--text); }

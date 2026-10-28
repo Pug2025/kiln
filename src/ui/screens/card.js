@@ -8,10 +8,12 @@ import { h, pad2 } from '../dom.js';
 
 export function card(data) {
   const kind = data.kind === 'bonus' ? 'Bonus' : data.kind === 'boss' ? 'Boss' : null;
+  // `hint` is one fact, or a list of first-use control lines (each on its own line)
+  const lines = Array.isArray(data.hint) ? data.hint.filter(Boolean) : data.hint ? [data.hint] : [];
   return h(data.controls ? 'div.card.controls' : 'div.card', { 'aria-live': 'polite' },
     h('div.kicker', h('span', data.kicker || `Level ${pad2(data.n)}`), kind ? h('span.tag', kind) : null),
     h('div.title', data.name || ''),
     data.adds ? h('div.adds', h('span', 'Adds'), ` ${data.adds}`) : null,
-    data.door ? h('div.adds', h('span', 'Wall'), ` ${data.door}`) : null,
-    data.hint ? h('div.sub', data.hint) : null);
+    data.door ? h('div.adds', data.door) : null,
+    lines.length ? h('div.sub', lines.flatMap((t, i) => (i ? [h('br'), t] : [t]))) : null);
 }

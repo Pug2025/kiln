@@ -40,8 +40,8 @@ const LEVELS = [
     kind: 'normal',
     mode: 'bottom',
     tier: 0,
-    adds: 'Numbered bricks and Multi',
-    hint: 'Numbers or dots show hits left. Multi makes three balls.',
+    adds: 'Tough bricks and Multi',
+    hint: 'Lines show hits left. Multi makes three balls.',
     rows: [
       '.....22.....',
       '....acca....',
@@ -63,7 +63,7 @@ const LEVELS = [
     mode: 'bottom',
     tier: 0,
     adds: 'Power drops',
-    hint: 'Marked drops give powers. Small embers buy Forge upgrades.',
+    hint: 'Marked drops give powers.',
     rows: [
       'cccccccccccc',
       'aaaaaaaaaaaa',
@@ -114,7 +114,7 @@ const LEVELS = [
     kind: 'bonus',
     mode: 'bottom',
     tier: 1,
-    adds: 'Bonus: 30 seconds',
+    adds: 'A 30 second clock',
     hint: 'Misses cost no lives.',
     rows: [
       'c...c..ccccc',
@@ -199,7 +199,7 @@ const LEVELS = [
     kind: 'normal',
     mode: 'bottom',
     tier: 1,
-    adds: 'Bad drops and Catch',
+    adds: 'Red drops and Catch',
     hint: 'Red drops shrink the paddle, speed up balls or dim the field.',
     rows: [
       '....cccc....',
@@ -259,7 +259,7 @@ const LEVELS = [
     boss: 'stoker',
     mode: 'bottom',
     tier: 1,
-    adds: 'Boss: The Stoker',
+    adds: 'Jaw plates',
     hint: 'Jaw plates take 2 hits or 1 laser. The core takes 5 hits.',
     rows: [
       '............',

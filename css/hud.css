@@ -108,6 +108,9 @@ html.rm .hud .hi, html.rm .hud .hud-btns .icon-btn { scale: none; }
    line above the field already needed by the right-hand lives block; no camera resize. */
 .boss-fact { margin-top: 12px; font: 500 var(--tiny)/1 var(--font-body); color: var(--text); white-space: nowrap; }
 .boss-fact[hidden] { display: none; }
+/* An empty fact keeps its one line (a no-break space in the same font, so exactly the height of a
+   fact), and the labels below never move when a fact comes or goes. */
+.boss-fact:empty::before { content: '\a0'; }
 .hud-heat.context-on .fx-row { margin-top: 6px; gap: 6px 12px; }
 .hud-heat.boss-on .fx { letter-spacing: 0; text-transform: none; }
 .hud.gutter .hud-heat.context-on .boss-fact { margin-top: calc(20px + var(--tiny)); }

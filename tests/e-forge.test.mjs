@@ -35,6 +35,25 @@ test('six items, three ranks each, prices rise', () => {
   assert.equal(forgePrice('nope', 1), -1);
 });
 
+test('Forge rank facts use player units and the game\'s separator', () => {
+  const paddle = FORGE_ITEMS.find((it) => it.id === 'paddle');
+  paddle.ranks.forEach((fact, i) => {
+    assert.equal(fact, `Paddle ${Math.round((FORGE_FX.PADDLE_ADD[i + 1] / PADDLE.W) * 100)}% wider`);
+  });
+  for (const it of FORGE_ITEMS) for (const fact of [it.fact, ...it.ranks]) {
+    assert.ok(!/;|→/.test(fact), `${it.id}: "${fact}" has no semicolon fragments or field units`);
+  }
+  // a rank fact in parts never splits a number from its word or unit, never starts a line with '·',
+  // and has no unbreakable run longer than 'HEAT pause −2 s ·' (16 characters), the longest that fit
+  // a 320 px Forge row in the captures (a longer one pushed the Buy button out of the panel)
+  for (const it of FORGE_ITEMS) for (const fact of it.ranks) {
+    if (!fact.includes('·')) continue;
+    assert.ok(!/ [+\u2212]?\d|\d /.test(fact), `${it.id}: "${fact}" can split a number from its word or unit`);
+    assert.ok(!/ \u00b7/.test(fact) && !/\u00b7\u00a0/.test(fact), `${it.id}: "${fact}" keeps '·' with the part before it`);
+    for (const run of fact.split(' ')) assert.ok(run.length <= 16, `${it.id}: "${run}" cannot wrap on a 320 px row`);
+  }
+});
+
 test('buyRank spends banked embers, one rank at a time, up to three', () => {
   const s = saveWith({}, 1000);
   assert.equal(nextPrice(s, 'heat'), 150);

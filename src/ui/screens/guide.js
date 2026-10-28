@@ -2,17 +2,18 @@ import { h } from '../dom.js';
 import { panel, button } from './parts.js';
 
 export const GUIDE = Object.freeze([
-  ['Phone controls', 'Drag low on the screen to steer. Tap to launch, release or shoot. Hold a second finger for Pull, which bends balls toward your paddle and uses HEAT.'],
-  ['Mouse and keyboard', 'Move the mouse or use arrows to steer. Click or Space launches, releases or fires Laser. Hold a mouse button for Pull. Shift pulls without arrows; Shift with arrows moves faster. Q or E uses Shield or your Overload. P or Esc pauses.'],
-  ['Pull', 'Available from level 7. Pull bends balls toward your paddle and slows them while held. Short holds can bring awkward shots within reach. Release to stop. It normally uses 40 HEAT per second and stops when HEAT runs out. It does not catch balls automatically.'],
+  ['Phone controls', 'Drag low on the screen to steer. Tap to launch, release or shoot. Hold a second finger for Pull.'],
+  ['Mouse and keyboard', 'Move the mouse or use arrows to steer. Click or Space launches, releases or fires Laser. Hold a mouse button or Shift for Pull. Shift with arrows moves faster. Q or E uses Shield or your Overload. P or Esc pauses.'],
+  ['Perfect hit', 'Tap, click or press Space just as the ball meets the paddle. The ball speeds up and goes through a brick.'],
+  ['Pull', 'From level 7. While held, Pull bends balls toward your paddle and slows them.'],
   ['Bricks', 'Lines show hits left. Silver bricks are armour. A lock means the brick cannot break.'],
   ['Loaded bricks', 'Tough bricks with a white power mark hold good drops.'],
-  ['Embers', 'Catch the small orange embers to fill HEAT, raise your score multiplier and earn currency for The Forge.'],
-  ['Power drops', 'Catch a marked drop for a power. Red drops have drawbacks. Laser adds two emitters to the paddle; each tap, click or Space press fires a pair of bolts. A ball on the paddle launches first. Most powers end with the level. There can be up to 12 balls at once.'],
-  ['HEAT and Shield', 'HEAT is available from level 7. Pull uses it while held. A Shield costs 100 HEAT, saves one miss and expires after 20 seconds. You can buy one per level. From level 22, your chosen Overload replaces that purchase: Purge clears rows, Quench slows balls and Fork adds balls. Firing it empties HEAT; the meter cannot refill during its cooldown.'],
-  ['The Forge', 'Embers stay in your wallet between runs. Spend them on permanent upgrades. Purchases apply from your next run.'],
-  ['Winning', 'When a level ends, embers still on screen and the final reward are banked automatically. Earlier missed embers are gone. Uncaught power drops disappear. Results show your earnings and Forge wallet.'],
-  ['Extra phone button', 'In Settings, Show action button adds an optional button. Tap it to launch, release or shoot; hold it for Pull. The other bottom button uses Shield or your Overload.'],
+  ['Embers', 'Small orange embers fill HEAT, raise your score multiplier and buy upgrades in The Forge.'],
+  ['Power drops', 'A marked drop gives a power. Red drops have drawbacks. Catch holds the ball on the paddle for a moment. Fire burns the bricks around each hit. Laser fires bolts from the paddle. Most powers end with the level. There can be up to 12 balls at once.'],
+  ['HEAT and Shield', 'Pull uses HEAT while held. A Shield costs 100 HEAT, saves one miss and lasts 20 seconds. One per level. From level 22, your chosen Overload replaces Shield: Purge clears rows, Quench slows balls and Fork adds balls. Firing it empties HEAT, and HEAT pauses before it refills.'],
+  ['The Forge', 'Embers stay in your Forge wallet between runs. Upgrades are permanent and apply from your next run.'],
+  ['End of a level', 'Embers still on screen when you clear a level are caught for you.'],
+  ['Action button', 'In Settings, Show action button adds a button. Tap it to launch, release or shoot. Hold it for Pull. The other bottom button uses Shield or your Overload.'],
 ]);
 
 export function guide(data, { el, nav }) {

@@ -18,6 +18,8 @@
 //           a top reserve (hudReserve, C's setReserve).
 // Each block is positioned by its top-left corner in CSS px and scaled by `s` from that corner.
 
+import { BALL, FIELD } from '../core/constants.js';
+
 /** Block widths and gaps in field units (= CSS px at s = 1), and the button pair in CSS px. */
 export const HUD = Object.freeze({
   SCORE_W: 320,  // SCORE kicker + 72-unit numeral and its suffix (a six-digit score and ×mult fit)
@@ -285,17 +287,33 @@ export function hudReserve(viewW, viewH, rect, safe) {
 }
 
 // ---------------------------------------------------------------- level card placement
-// The level card shows over the serving world for a moment. It goes where it hides nothing that
-// matters: the empty band above the formation (the headroom) or the one under it, never over the
-// bricks or the paddle and the ball sitting on it.
+// The level card names the level over the serving world for a moment. Where it goes:
+// - Inside the chamber, never across the lintel. The lintel frames play off from the painted
+//   headroom; a card it runs through reads as cut in two. The card keeps CARD_LINTEL clear of
+//   the ceiling's face (bottom mode) and of the far wall (horizontal mode).
+// - Where the eye already is: in the open space between the formation and the paddle, which the
+//   player looks across at the serve. The same place on every level, so the eye learns it.
+// - Never over the paddle's track, the served ball or its launch: the card keeps CARD_LANE above
+//   the paddle's face (the ball on it and a margin), and a launch takes it away at once (main.js
+//   frameStep, ui.js card(null, true)), so the ball never flies under it.
+// - Too little open space (phones, deep formations): the card grows up over the lowest bricks,
+//   which wait for the serve; never down onto the ball and never up across the lintel.
+// Ring mode has no lintel: the empty band above or under the ring, clear of the paddle, in the
+// same places as before the lintel work (d-level-card holds them to those).
 
 const CARD_MARGIN = 12;   // field units between the card and the bricks
-const CARD_PADDLE = 60;   // field units kept clear around the paddle's track (ball on it included)
+const CARD_LINTEL = 24;   // field units between the card and the ceiling's face or the far wall
+const CARD_PADDLE = 60;   // ring and horizontal mode: field units kept clear round the paddle
+/** Bottom mode: field units kept clear above the paddle's face, the served ball and a margin. */
+export const CARD_LANE = 2 * BALL.R + CARD_MARGIN;
 
 /**
- * Empty horizontal bands of the field (field units, top to bottom) for the level card.
+ * Where the level card may go, in field units. Each entry is an empty band [y0, y1] and the room
+ * [r0, r1] around it the card must stay inside whatever its height (the chamber under the lintel,
+ * clear of the paddle and the launch lane), best first. `x0`, `x1`: the card's horizontal room
+ * (horizontal mode: between the paddle's track and the far wall; else the whole field).
  * @param {import('../core/types.js').World} world
- * @returns {Array<[number, number]>}
+ * @returns {Array<[number, number, number, number]> & {x0:number, x1:number}}
  */
 export function cardBands(world) {
   const B = world.bricks;
@@ -307,30 +325,59 @@ export function cardBands(world) {
     if (y0 < top) top = y0;
     if (y1 > bottom) bottom = y1;
   }
-  // the headroom band starts under the field's top margin, where an inset HUD may sit
-  const y0 = HUD.INSET_TOP;
-  let bands = Number.isFinite(top)
-    ? [[y0, Math.max(y0, top - CARD_MARGIN)], [Math.min(1080, bottom + CARD_MARGIN), 1080]]
-    : [[y0, 1080]];
-  // keep the paddle (and a served ball) clear: its track is a row (bottom, ring) or a column (left)
+  const bricks = Number.isFinite(top);
   const p = world.paddle;
   const mode = world.level.mode;
-  const half = mode === 'left' ? p.w / 2 + CARD_PADDLE / 2 : (p.h || 16) / 2 + CARD_PADDLE;
-  const c0 = p.y - half, c1 = p.y + half;
-  const out = [];
-  for (const [a, b] of bands) {
-    if (c1 <= a || c0 >= b) { out.push([a, b]); continue; }
-    if (c0 > a) out.push([a, c0]);
-    if (c1 < b) out.push([c1, b]);
+  const F = world.field || {};
+  let out;
+  if (mode !== 'left' && mode !== 'ring') {
+    // the chamber: under the ceiling (or the field's top margin, where an inset HUD may sit) and
+    // above the launch lane. The card always takes the open band under the formation; the gap
+    // between the ceiling and the bricks (CEILING.GAP at most) is never tall enough for it.
+    const roof = Math.max(HUD.INSET_TOP, F.ceilingY > 0 ? F.ceilingY + CARD_LINTEL : 0);
+    const floor = p.y - (p.h || 16) / 2 - CARD_LANE;
+    const open = bricks ? Math.min(floor - 1, Math.max(roof, bottom + CARD_MARGIN)) : roof;
+    out = [[open, floor, roof, floor]];
+  } else {
+    // the bands above and under the formation, either side of the paddle (and a served ball):
+    // its track is a column in horizontal mode, here at its serving place along it. The bands
+    // start under the field's top margin (where an inset HUD may sit); the rooms start at the
+    // field's top, so a card taller than its band rises toward the top as it always has, rather
+    // than down into the ring (phones: L21, The Core's stage 3 and the Overburn ring waves)
+    const y0 = HUD.INSET_TOP;
+    const half = mode === 'left' ? p.w / 2 + CARD_PADDLE / 2 : (p.h || 16) / 2 + CARD_PADDLE;
+    const c0 = p.y - half, c1 = p.y + half;
+    const rooms = c1 <= 0 || c0 >= FIELD.H ? [[0, FIELD.H]] : [[0, c0], [c1, FIELD.H]];
+    const free = bricks ? [[y0, top - CARD_MARGIN], [bottom + CARD_MARGIN, FIELD.H]] : [[y0, FIELD.H]];
+    out = [];
+    for (const [a, b] of free) {
+      for (const [r0, r1] of rooms) {
+        const s = Math.max(a, r0), e = Math.min(b, r1);
+        if (e - s > 1) out.push([s, e, r0, r1]);
+      }
+    }
+    // a formation from edge to edge (sliding Overburn columns): over the bricks, still off the paddle
+    if (!out.length) for (const [r0, r1] of rooms) if (r1 - Math.max(r0, y0) > 1) out.push([Math.max(r0, y0), r1, r0, r1]);
   }
-  bands = out.filter(([a, b]) => b - a > 1);
-  return bands;
+  out.x0 = 0;
+  out.x1 = FIELD.W;
+  if (mode === 'left') {
+    // right of the paddle's track and the ball on it, left of the far wall (the lintel of this
+    // mode) also where it stands at the field's edge: the camera's intro dolly brings it about
+    // 3% of the field's width in, past a card held only by the field box's 16 px inset
+    out.x0 = p.x + (p.h || 16) / 2 + 2 * BALL.R + CARD_MARGIN;
+    out.x1 = (F.farX > 0 && F.farX < FIELD.W ? F.farX : FIELD.W) - CARD_LINTEL;
+  }
+  return out;
 }
 
 /**
- * Centre (field y) for a card `h` field units tall: the first band it fits (the headroom comes
- * first), else the tallest band; always inside the field.
- * @param {Array<[number, number]>} bands
+ * Centre (field y) for a card `h` field units tall: the middle of the first band it fits, else
+ * of the tallest band, grown inside that band's room (bottom mode: up over the lowest bricks,
+ * from the launch lane). A card taller than its room keeps the room's top clear (the lintel
+ * side), as far as the visible field allows. Bands without a room ([y0, y1]) may use the whole
+ * visible field.
+ * @param {Array<number[]>} bands  from cardBands, best first
  * @param {number} h
  * @param {number} [minY] visible field top after ceiling framing
  * @param {number} [maxY] visible field bottom
@@ -340,12 +387,14 @@ export function cardCentre(bands, h, minY = 0, maxY = 1080) {
   for (const b of bands) {
     const a = Math.max(minY, b[0]), z = Math.min(maxY, b[1]);
     if (z <= a) continue;
-    if (!pick || z - a > pick[1] - pick[0]) pick = [a, z];
-    if (z - a >= h) { pick = [a, z]; break; }
+    const c = [a, z, Math.max(minY, b.length > 2 ? b[2] : minY), Math.min(maxY, b.length > 2 ? b[3] : maxY)];
+    if (!pick || z - a > pick[1] - pick[0]) pick = c;
+    if (z - a >= h) { pick = c; break; }
   }
   if (!pick) return minY + (maxY - minY) * 0.42;
-  const half = Math.min(h / 2, (maxY - minY) / 2);
-  return Math.min(maxY - half, Math.max(minY + half, (pick[0] + pick[1]) / 2));
+  const half = h / 2;
+  const y = Math.max(pick[2] + half, Math.min(pick[3] - half, (pick[0] + pick[1]) / 2));
+  return Math.max(minY + Math.min(half, (maxY - minY) / 2), Math.min(maxY - half, y));
 }
 
 /**

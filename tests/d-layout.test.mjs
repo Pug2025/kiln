@@ -5,7 +5,7 @@ import { test, assert } from './lib.mjs';
 import { fitCamera, createPose } from '../src/render/fit.js';
 import {
   hudLayout, hudText, hudHeights, hudReserve, bandPx, HUD, TEXT, BTNS_W, formatScore, formatClock,
-  cardBands, cardCentre, scoreTextW,
+  cardBands, cardCentre, scoreTextW, CARD_LANE,
 } from '../src/ui/layout.js';
 
 const fieldRect = (w, h) => fitCamera(w, h, createPose(), {}).rect;
@@ -199,31 +199,40 @@ test('hudReserve: a top reserve gives the band room above the field (the rendere
   for (const [w, h] of [[375, 812], [1440, 900], [844, 390]]) assert.equal(hudReserve(w, h, fieldRect(w, h), NO_SAFE), 0);
 });
 
-test('level card: in the empty band above or under the formation, never over bricks or the paddle', () => {
+test('level card: under the formation, under the lintel, never over the paddle or the served ball', () => {
   const bricks = (rows) => {
     const B = { count: 0, alive: [], y: [], h: [] };
     for (const y of rows) { B.alive.push(1); B.y.push(y); B.h.push(30); B.count++; }
     return B;
   };
-  const world = (rows, mode = 'bottom', paddle = { x: 360, y: 1000, w: 120, h: 16 }) => ({ bricks: bricks(rows), paddle, level: { mode } });
-  // a low formation (rows 465 to 615, as the lead's rule anchors them): headroom first
-  const low = cardBands(world([465, 495, 525, 555, 585, 615]));
-  assert.deepEqual(low[0], [90, 450 - 12]);
-  const y = cardCentre(low, 260);
-  assert.ok(y - 130 >= 90 && y + 130 <= 438, `card in the headroom (${y})`);
+  const world = (rows, mode = 'bottom', paddle = { x: 360, y: 1000, w: 120, h: 16 }, field = { ceilingY: 0, farX: 720 }) =>
+    ({ bricks: bricks(rows), paddle, level: { mode }, field });
+  const floor = 1000 - 8 - CARD_LANE; // the served ball and a margin (a launch cuts the card at once)
+  // a low formation under a low ceiling (level 1: face at 390, rows 510 to 630): the gap above the
+  // bricks holds the lintel, so the card takes the open band under the formation, where the eye is
+  const low = cardBands(world([525, 555, 585, 615], 'bottom', undefined, { ceilingY: 390, farX: 720 }));
+  assert.deepEqual(low.slice(), [[642, floor, 390 + 24, floor]]);
+  const y = cardCentre(low, 200, 240, 1080);
+  assert.ok(y - 100 >= 642 && y + 100 <= floor, `card under the formation (${y})`);
+  // taller than the open band: it grows up over the lowest bricks, never onto the ball or the lintel
+  const yg = cardCentre(low, 400, 240, 1080);
+  assert.ok(Math.abs(yg + 200 - floor) < 1e-9 && yg - 200 >= 414, `grown card (${yg})`);
+  const yx = cardCentre(low, 600, 240, 1080);
+  assert.ok(Math.abs(yx - 300 - 414) < 1e-9, `taller than the chamber: the lintel side stays clear (${yx})`);
   // a tall formation: the card goes under it, above the paddle and the served ball
   const tall = cardBands(world([105, 165, 225, 285, 345, 405, 465, 525, 555, 585]));
   const yt = cardCentre(tall, 260);
-  assert.ok(yt - 130 >= 600 + 12 - 1e-9 && yt + 130 <= 1000 - 68 + 1e-9, `card under the formation (${yt})`);
-  // too little room anywhere: the tallest band, still inside the field
+  assert.ok(yt - 130 >= 600 + 12 - 1e-9 && yt + 130 <= floor + 1e-9, `card under the formation (${yt})`);
+  // too little room under the formation: grown up from the paddle's room, still inside the field
   const full = cardBands(world([105, 195, 285, 375, 465, 555, 645, 735, 825]));
   const yf = cardCentre(full, 400);
-  assert.ok(yf - 200 >= 0 && yf + 200 <= 1080);
+  assert.ok(yf - 200 >= 90 && Math.abs(yf + 200 - floor) < 1e-9, `grown (${yf})`);
   // horizontal mode: the band around the paddle's track centre is kept clear
   const side = cardBands(world([105, 975], 'left', { x: 40, y: 540, w: 120, h: 16 }));
   for (const [a, b] of side) assert.ok(b <= 540 - 90 || a >= 540 + 90, 'clear of the side paddle');
+  assert.ok(side.x0 >= 40 + 8 + 18, 'right of the paddle track and the ball on it');
   // scrolling rows waiting above the field do not count
-  assert.deepEqual(cardBands(world([-200, 615]))[0], [90, 600 - 12]);
+  assert.deepEqual(cardBands(world([-200, 615]))[0], [642, floor, 90, floor]);
 });
 
 test('level card: cropped ceiling framing uses only visible empty bands', () => {

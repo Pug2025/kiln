@@ -53,6 +53,31 @@ test('level labels and help fit the card without extra punctuation', () => {
   }
 });
 
+test('cards say each thing once: no adds repeats the name or the kind tag, no stale pick or hit-count copy', () => {
+  for (const l of LEVELS) {
+    if (l.kind === 'boss') assert.ok(!l.adds.includes(l.name), `${l.id}: "${l.adds}" repeats the boss name`);
+    assert.ok(!/^(final )?(boss|bonus)\b/i.test(l.adds), `${l.id}: "${l.adds}" repeats the kind tag`);
+    assert.ok(!/\bchoose\b/i.test(l.hint || ''), `${l.id}: the pick screen came first`);
+    assert.ok(!/\b(numbers?|dots|numbered)\b/i.test(`${l.adds} ${l.hint || ''}`), `${l.id}: hits left are lines`);
+    assert.ok(!/;/.test(l.hint || ''), `${l.id}: no semicolon fragments`);
+  }
+  assert.ok(!RULES.some((r) => /^(Numbered|Black|Drop carriers|Gravity towers|Sealed ball$)/.test(r.label)),
+    'Overburn uses the campaign names');
+});
+
+test('a card that names a time says it is the level\'s clock, in the level\'s own number', () => {
+  // 'ADDS 30 seconds' reads as 30 seconds of extra time, not a level that lasts 30 seconds
+  let timed = 0;
+  for (const l of LEVELS) {
+    const secs = /(\d+)\s*s(?:ec(?:ond)?s?)?\b/i.exec(l.adds);
+    if (!secs) continue;
+    timed++;
+    assert.match(l.adds, /\bclock\b/, `${l.id}: "${l.adds}" names the clock`);
+    assert.equal(Number(secs[1]) * 1000, l.rules.timerMs, `${l.id}: "${l.adds}" matches its timer`);
+  }
+  assert.ok(timed >= 1, 'level 5 names its clock');
+});
+
 test('player-facing text: Kiln words only, and the facts are true', () => {
   // the handoff "Do NOT" list: no ceramic-era words on a card, a door or a wave
   const banned = /\b(earthenware|stoneware|porcelain|glaze[sd]?|tin|brass|basalt|plaster|chimes?|workshop|charges?|spells?|gifts?)\b/i;

@@ -2,25 +2,48 @@
 import { test, assert } from './lib.mjs';
 import { submitShaderPreparation } from '../src/render/shader-preparation.js';
 
+/** The page's visibility (a document with only the Page Visibility API). */
+class Page {
+  listeners = new Set();
+  constructor(state) { this.visibilityState = state; }
+  addEventListener(name, fn) { assert.equal(name, 'visibilitychange'); this.listeners.add(fn); }
+  removeEventListener(name, fn) { if (name === 'visibilitychange') this.listeners.delete(fn); }
+  set(state) { this.visibilityState = state; for (const fn of [...this.listeners]) fn(); }
+}
 class Scheduler {
   time = 0; id = 0; jobs = new Map(); history = new Map(); maximumActive = 0; cleared = [];
+  constructor(document = null) { this.document = document; }
   now() { return this.time; }
   setTimeout(callback, delay) {
-    const id = ++this.id, job = { callback, at: this.time + delay, delay };
+    // A hidden page's timers are throttled to at most one a second, as in a browser's background tab.
+    const wait = this.document?.visibilityState === 'hidden' ? Math.max(delay, 1000) : delay;
+    const id = ++this.id, job = { callback, at: this.time + wait, delay };
     this.jobs.set(id, job); this.history.set(id, job); this.maximumActive = Math.max(this.maximumActive, this.jobs.size);
     return id;
   }
   clearTimeout(id) { this.cleared.push(id); this.jobs.delete(id); }
+  first() { return [...this.jobs].sort((a, b) => a[1].at - b[1].at || a[0] - b[0])[0]; }
   next() {
-    const row = [...this.jobs].sort((a, b) => a[1].at - b[1].at || a[0] - b[0])[0];
+    const row = this.first();
     assert.ok(row, 'one scheduled callback exists');
-    const [id, job] = row; this.jobs.delete(id); this.time = job.at; job.callback();
+    // A callback that was due while script could not run (a frozen page) runs late, not back in time.
+    const [id, job] = row; this.jobs.delete(id); this.time = Math.max(this.time, job.at); job.callback();
     return id;
   }
+  /** A running page: `ms` pass and every timer that falls due runs, in order. */
+  pass(ms) {
+    const end = this.time + ms;
+    for (let row = this.first(); row && row[1].at <= end; row = this.first()) this.next();
+    this.time = end;
+  }
+  /** A frozen or suspended page: `ms` pass and no script runs. */
+  suspend(ms) { this.time += ms; }
   stale(id) { this.history.get(id).callback(); }
 }
-function fixture({ khr = true, ready = [0, 0, 0], timeoutMs = 12000 } = {}) {
-  const scheduler = new Scheduler(), controller = new AbortController(), calls = [], pending = new Set(ready.map((_, i) => i));
+function fixture({ khr = true, ready = [0, 0, 0], timeoutMs = 12000, visibility = 'visible' } = {}) {
+  // visibility null: a browser without the Page Visibility API (no document for the deadline).
+  const scheduler = new Scheduler(visibility === null ? null : new Page(visibility));
+  const controller = new AbortController(), calls = [], pending = new Set(ready.map((_, i) => i));
   const state = { epoch: 7, lost: false, disposed: false, compileError: null, readinessError: null, extensionError: null, afterQuery: null, afterCompile: null };
   const programs = ready.map((at, id) => ({ id, program: { id },
     getUniforms() { throw Error('helper must not reflect uniforms'); },
@@ -53,12 +76,17 @@ function fixture({ khr = true, ready = [0, 0, 0], timeoutMs = 12000 } = {}) {
     properties: { get(material) { calls.push(['properties', material.id]); return props.get(material); } },
   };
   const options = { epoch: state.epoch, getEpoch: () => state.epoch, isDisposed: () => state.disposed, signal: controller.signal, scheduler, timeoutMs, pollMs: 10 };
-  return { scheduler, controller, state, calls, programs, props, a, b, pending, renderer, scene, camera, options,
-    submit: () => submitShaderPreparation(renderer, scene, camera, options) };
+  return { scheduler, controller, state, calls, programs, props, a, b, pending, ready, renderer, scene, camera, options,
+    page: scheduler.document, submit: () => submitShaderPreparation(renderer, scene, camera, options) };
 }
 const queryCount = f => f.calls.filter(row => row[0] === 'query').length;
 const compileCount = f => f.calls.filter(row => row[0] === 'compile').length;
-const noDangling = f => { assert.equal(f.scheduler.jobs.size, 0); assert.ok(f.scheduler.maximumActive <= 1); };
+const noDangling = f => {
+  assert.equal(f.scheduler.jobs.size, 0); assert.ok(f.scheduler.maximumActive <= 1);
+  assert.equal(f.page?.listeners.size ?? 0, 0, 'no visibility listener outlives the job');
+};
+const settledFlag = job => { const flag = { settled: false }; job.done.then(() => { flag.settled = true; }, () => { flag.settled = true; }); return flag; };
+const flush = async () => { for (let i = 0; i < 4; i++) await Promise.resolve(); };
 
 // These tests attach rejection handlers before advancing their fake scheduler.
 test('submits public compile synchronously and waits for every deduplicated variant, including current-only programs', async () => {
@@ -106,15 +134,74 @@ test('readiness and extension exceptions reject through the owned promise with n
   }
 });
 
-test('the single polling timer reaches its owned deadline and leaves no active or effective stale callback', async () => {
-  const f = fixture({ ready: [Infinity, Infinity, Infinity], timeoutMs: 25 }), job = f.submit();
-  const rejected = assert.rejects(job.done, error => error.name === 'TimeoutError' && error.code === 'SHADER_PREPARATION_TIMEOUT');
-  f.scheduler.next(); f.scheduler.next();
-  assert.equal([...f.scheduler.jobs.values()][0].at, 25, 'last wait is capped to the remaining deadline');
-  const queries = queryCount(f); f.scheduler.next(); await rejected;
-  assert.equal(queryCount(f), queries, 'no query is issued at or after the expired deadline');
-  noDangling(f); for (const id of f.scheduler.history.keys()) assert.doesNotThrow(() => f.scheduler.stale(id));
-  assert.equal(queryCount(f), queries);
+test('the poll at the deadline asks the driver once more, then times out with programs pending and leaves no callback', async () => {
+  for (const visibility of ['visible', null]) {
+    const f = fixture({ ready: [Infinity, Infinity, Infinity], timeoutMs: 25, visibility }), job = f.submit();
+    const rejected = assert.rejects(job.done, error => error.name === 'TimeoutError' && error.code === 'SHADER_PREPARATION_TIMEOUT');
+    f.scheduler.next(); f.scheduler.next();
+    assert.equal([...f.scheduler.jobs.values()][0].at, 25, 'last wait is capped to the remaining deadline');
+    const queries = queryCount(f); f.scheduler.next(); await rejected;
+    assert.equal(queryCount(f), queries + 3, 'the poll at the deadline makes one last completion check of each program');
+    noDangling(f); for (const id of f.scheduler.history.keys()) assert.doesNotThrow(() => f.scheduler.stale(id));
+    assert.equal(queryCount(f), queries + 3, 'no query after the timeout');
+  }
+});
+
+test('a poll that runs late after script was held past the deadline asks once and resolves when every program is done', async () => {
+  for (const ready of [[1500, 1500, 1500], [1500, 14000, 1500]]) {
+    const f = fixture({ ready }), job = f.submit();
+    f.scheduler.next(); assert.equal(queryCount(f), 3, 'pending at the first poll');
+    f.scheduler.suspend(13000); // a long task or paused script while the page stays visible: no poll can run
+    f.scheduler.next(); assert.equal(f.scheduler.time, 13010);
+    assert.equal(queryCount(f), 6, 'the late poll asks the driver once for each program');
+    if (ready[1] === 1500) {
+      const result = await job.done;
+      assert.equal(result.polls, 2); assert.equal(result.completionMs, 13010); assert.equal(result.hiddenMs, 0);
+    } else await assert.rejects(job.done, error => error.code === 'SHADER_PREPARATION_TIMEOUT', 'still pending: times out');
+    noDangling(f);
+  }
+});
+
+test('a long hold inside a completion query cannot time out programs that are done', async () => {
+  const f = fixture({ ready: [0, 0, 0] }); let held = false;
+  f.state.afterQuery = () => { if (!held) { held = true; f.scheduler.time += 15000; } };
+  const job = f.submit(); f.scheduler.next(); const result = await job.done;
+  assert.equal(queryCount(f), 3); assert.equal(result.completionMs, 15010); assert.equal(result.programs.length, 3); noDangling(f);
+});
+
+test('switched away mid-wait and frozen past the deadline, preparation still finishes once the driver is done', async () => {
+  const f = fixture({ ready: [Infinity, Infinity, Infinity] }), job = f.submit(), flag = settledFlag(job);
+  f.scheduler.pass(1000); // visible, programs pending
+  f.page.set('hidden'); f.scheduler.pass(2000); // another app or tab in front: throttled polls
+  f.scheduler.suspend(15000); // the page is frozen: no script runs for 15 s
+  f.scheduler.pass(1000); await flush(); // unfrozen while still hidden: the overdue poll runs, still pending
+  assert.equal(flag.settled, false, 'hidden and frozen time did not count toward the 12 s deadline');
+  f.ready.fill(f.scheduler.time); // the driver finishes
+  f.scheduler.pass(1000); const result = await job.done;
+  assert.equal(result.completionMs, 20000); assert.equal(result.hiddenMs, 19000);
+  assert.equal(result.programs.length, 3); noDangling(f);
+});
+
+test('visible time adds up across hidden spans, so a really stuck preparation still times out at 12 s seen', async () => {
+  const f = fixture({ ready: [Infinity, Infinity, Infinity] }), job = f.submit(), flag = settledFlag(job);
+  const rejected = assert.rejects(job.done, error => error.code === 'SHADER_PREPARATION_TIMEOUT');
+  f.scheduler.pass(5000); // 5 s seen
+  f.page.set('hidden'); f.scheduler.pass(600000); // 10 min hidden, polled once a second
+  f.page.set('visible'); f.scheduler.pass(6999); await flush();
+  assert.equal(flag.settled, false, 'not at 11 999 ms seen');
+  f.scheduler.pass(1); await rejected; // 12 000 ms seen
+  assert.equal(f.scheduler.time, 612000); noDangling(f);
+});
+
+test('a preparation that starts hidden does not start its deadline until the page is shown', async () => {
+  const f = fixture({ ready: [Infinity, Infinity, Infinity], visibility: 'hidden' }), job = f.submit(), flag = settledFlag(job);
+  const rejected = assert.rejects(job.done, error => error.code === 'SHADER_PREPARATION_TIMEOUT');
+  f.scheduler.pass(60000); await flush();
+  assert.equal(flag.settled, false, '60 s hidden did not count');
+  f.page.set('visible'); f.scheduler.pass(11999); await flush();
+  assert.equal(flag.settled, false, 'not at 11 999 ms seen');
+  f.scheduler.pass(1); await rejected; noDangling(f);
+  f.page.set('hidden'); assert.equal(f.page.listeners.size, 0, 'a settled job no longer listens');
 });
 
 test('owner cancel and AbortSignal stop and clear an in-flight wait exactly once', async () => {
@@ -168,10 +255,17 @@ test('post-success cancellation cannot alter transferred programs, repeat settle
   f.scheduler.stale(1); assert.equal(result.programs.length, count); assert.deepEqual(result.programs, f.programs); noDangling(f);
 });
 
-test('a compile that exhausts the deadline cannot schedule work or perform driver completion queries', async () => {
-  const f = fixture({ timeoutMs: 20 }); f.state.afterCompile = () => { f.scheduler.time = 20; };
-  const job = f.submit(); await assert.rejects(job.done, error => error.name === 'TimeoutError');
-  assert.equal(compileCount(f), 1); assert.equal(queryCount(f), 0); noDangling(f);
+test('a compile that exhausts the deadline gets one completion check: done programs resolve, pending ones time out', async () => {
+  for (const ready of [[0, 0, 0], [0, Infinity, 0]]) {
+    const f = fixture({ timeoutMs: 20, ready }); f.state.afterCompile = () => { f.scheduler.time = 20; };
+    const job = f.submit();
+    assert.equal(queryCount(f), 0, 'no completion query inside submission');
+    assert.equal(f.scheduler.jobs.size, 1); assert.equal([...f.scheduler.jobs.values()][0].at, 20, 'the last check is not delayed');
+    f.scheduler.next();
+    if (ready[1] === 0) { const result = await job.done; assert.equal(result.polls, 1); assert.equal(result.programs.length, 3); }
+    else await assert.rejects(job.done, error => error.name === 'TimeoutError');
+    assert.equal(compileCount(f), 1); assert.equal(queryCount(f), 3); noDangling(f);
+  }
 });
 
 test('invalid configuration fails before submission rather than allowing an unbounded or watchdog-length wait', () => {

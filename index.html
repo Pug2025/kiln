@@ -86,7 +86,8 @@ function kilnStartupGuard(win, doc, loadMain) {
     if (episode && !episode.recovery) episode.lastFailure = record;
     else episode = { failure: record, lastFailure: null, retries: [], recovery: null };
     saveEpisode();
-    win.clearTimeout(watchdog);
+    holdWatchdog();
+    doc.removeEventListener('visibilitychange', visibilityChanged);
     showFailure();
     if (!info.retry || win.navigator.onLine === false) return;
     // A denied storage write must not create a reload loop.
@@ -138,9 +139,32 @@ function kilnStartupGuard(win, doc, loadMain) {
     build = event.data.build || build;
     note({ ...event.data, kind: 'service-worker' });
   }
-  const watchdog = win.setTimeout(() => fail('Startup timed out', {
-    kind: 'timeout', pendingUrls: pendingUrls(), retry: true,
-  }), 20000);
+  // The 20 s startup deadline counts only time the page can be seen. A hidden page (a background
+  // tab, a locked phone) gets no animation frames, so its first frame waits until it comes forward:
+  // that wait is not a stalled boot. Hiding holds the deadline; showing resumes what is left of it.
+  const clock = () => (win.performance?.now ? win.performance.now() : Date.now());
+  let watchdog = null, armedAt = 0, deadlineLeft = 20000;
+  function armWatchdog() {
+    if (watchdog !== null || ready || failed || doc.visibilityState === 'hidden') return;
+    armedAt = clock();
+    watchdog = win.setTimeout(() => {
+      watchdog = null;
+      deadlineLeft = 0;
+      fail('Startup timed out', { kind: 'timeout', pendingUrls: pendingUrls(), retry: true });
+    }, deadlineLeft);
+  }
+  function holdWatchdog() {
+    if (watchdog === null) return;
+    win.clearTimeout(watchdog);
+    watchdog = null;
+    deadlineLeft = Math.max(0, deadlineLeft - (clock() - armedAt));
+  }
+  function visibilityChanged() {
+    if (doc.visibilityState === 'hidden') holdWatchdog();
+    else armWatchdog();
+  }
+  doc.addEventListener('visibilitychange', visibilityChanged);
+  armWatchdog();
   const api = {
     fontStyleReady,
     note,
@@ -160,7 +184,8 @@ function kilnStartupGuard(win, doc, loadMain) {
       current = 'ready';
       const record = note({ stage: current });
       if (episode && !episode.recovery) { episode.recovery = record; saveEpisode(); }
-      win.clearTimeout(watchdog);
+      holdWatchdog();
+      doc.removeEventListener('visibilitychange', visibilityChanged);
       win.clearTimeout(reloadTimer);
       try { win.sessionStorage.removeItem(RETRY); } catch { /* storage is optional */ }
       doc.removeEventListener('error', resourceError, true);
@@ -175,7 +200,9 @@ function kilnStartupGuard(win, doc, loadMain) {
       // Keep nonfatal install/cache diagnostics after ready; a background install can finish later.
     },
     snapshot() {
-      return { stage: current, ready, failed, entryUrl, active: [...active], pendingUrls: ready ? [] : pendingUrls(), records: JSON.parse(JSON.stringify(records)), episode: JSON.parse(JSON.stringify(episode)) };
+      // deadlineMs: visible startup time left before the timeout; held (not counting) while hidden.
+      const deadlineMs = Math.round(watchdog === null ? deadlineLeft : Math.max(0, deadlineLeft - (clock() - armedAt)));
+      return { stage: current, ready, failed, entryUrl, active: [...active], pendingUrls: ready ? [] : pendingUrls(), deadlineMs, deadlineHeld: watchdog === null && !ready && !failed, records: JSON.parse(JSON.stringify(records)), episode: JSON.parse(JSON.stringify(episode)) };
     },
     async start() {
       if (started || failed) return;
@@ -188,7 +215,10 @@ function kilnStartupGuard(win, doc, loadMain) {
         if (!failed) await main.boot(api);
       } catch (error) {
         const network = /fetch dynamically imported|importing a module script|loading dynamically imported|networkerror|load failed/i.test(error?.message || '');
-        fail(error, { kind: 'entry', retry: network && !(error instanceof SyntaxError) });
+        // Graphics lost or stalled during startup (a lost context, the shader-preparation deadline) can
+        // work in a fresh page, so they get the one automatic retry too.
+        const graphics = error?.name === 'AbortError' || error?.code === 'SHADER_PREPARATION_TIMEOUT';
+        fail(error, { kind: 'entry', retry: (network && !(error instanceof SyntaxError)) || graphics });
       }
     },
   };

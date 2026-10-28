@@ -20,6 +20,16 @@ import { coreProtected, coreDamageFraction, CORE_COOL_HEAT, stokerThroat, orbitA
  */
 const SPENT_HEAT = 0.3;
 
+/**
+ * The Stoker's head (brow, dome and cheeks) is dark titanium warmed by the furnace. On the shared
+ * titanium its broad frontal brow mirrored the kiln's cool overhead strip, key and rim lights and
+ * read as a blue-grey slab (sRGB about 90, 104, 125), the brightest thing at the top of the screen
+ * (review Oct 28). A darker warm tint, less reflection and a faint heat-low floor that keeps the
+ * grazing bevels warm: about 44, 29, 21 on the brow at 1280 and 390, chosen in game by capture
+ * (status/CLAUDE_STOKER_BROW.md). Uniform values only: it shares the titanium programs.
+ */
+export const STOKER_TITANIUM = Object.freeze({ color: 0x6e6450, envMapIntensity: 1.0, heat: 0.02 });
+
 const HW = FIELD.W / 2;
 const HH = FIELD.H / 2;
 
@@ -78,13 +88,19 @@ export function createBoss(scene, M) {
   });
 
   // ---- The Stoker ----
+  // Its own titanium twin: the arena lip, the Crucible's ring and The Core's shields keep M.titaniumP.
+  const stokerTi = M.titaniumP.clone();
+  stokerTi.name = 'stoker-titanium';
+  stokerTi.color.setHex(STOKER_TITANIUM.color);
+  stokerTi.envMapIntensity = STOKER_TITANIUM.envMapIntensity;
+  stokerTi.emissive.copy(PAL.heatLoRest).multiplyScalar(STOKER_TITANIUM.heat);
   const stoker = new THREE.Group();
   {
-    const brow = new THREE.Mesh(new RoundedBoxGeometry(460, 46, 30, 3, 6), M.titaniumP);
+    const brow = new THREE.Mesh(new RoundedBoxGeometry(460, 46, 30, 3, 6), stokerTi);
     brow.position.set(0, 120, 0);
     const cheekGeo = new RoundedBoxGeometry(46, 230, 30, 3, 6);
-    const cl = new THREE.Mesh(cheekGeo, M.titaniumP);
-    const cr = new THREE.Mesh(cheekGeo, M.titaniumP);
+    const cl = new THREE.Mesh(cheekGeo, stokerTi);
+    const cr = new THREE.Mesh(cheekGeo, stokerTi);
     cl.position.set(-230, 10, 0);
     cr.position.set(230, 10, 0);
     const lining = new THREE.Mesh(new THREE.PlaneGeometry(420, 210), trimMaterial(M.matteP, 'throat'));
@@ -163,7 +179,7 @@ export function createBoss(scene, M) {
       if (o.name && o.name.startsWith('part-') && !/_\d+$/.test(o.name)) parts[o.name] = o;
       if (!o.isMesh) return;
       const n = (o.material && o.material.name || '').toLowerCase();
-      if (n.includes('titanium')) o.material = M.titaniumP;
+      if (n.includes('titanium')) o.material = bossId === 'stoker' ? stokerTi : M.titaniumP;
       else if (n.includes('matte')) o.material = M.matteP;
       else if (n.includes('ember')) o.material = emberMat;
       else if (n.includes('core')) o.material = hotCore;

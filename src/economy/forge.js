@@ -10,14 +10,21 @@ export const BALL_KIND_NAMES = Object.freeze(['Standard', 'Heavy', 'Splitter', '
 /**
  * The six items, three ranks each. `fact` is the item's one-line description; `ranks[r-1]` is the
  * short fact for rank r (information, never an instruction); `prices[r-1]` is what rank r costs
- * in banked embers; `max` is the top rank.
+ * in banked embers; `max` is the top rank. Each rank's fact is the total from no upgrade, never a
+ * step from the rank before: The Forge shows the next rank's fact, and the top rank's once maxed.
  */
+// Facts in parts ('a · b'): a number stays on one line with the word before it and its unit
+// (no-break spaces), and the '·' stays with the part before it, so a narrow Forge row never splits
+// '+1' from 's' or starts a line with '·'. Other words wrap as usual, so a long part such as
+// 'HEAT pause 6 s shorter' still fits a 320 px row without pushing the Buy button out.
+const parts = (...p) => p.map((s) => s.replace(/ (?=[+\u2212]?\d)|(?<=\d) /g, '\u00a0')).join('\u00a0\u00b7 ');
+
 export const FORGE_ITEMS = Object.freeze([
-  { id: 'lives', name: 'Start lives', fact: 'More lives at the start of each run', ranks: ['Start with 4 lives', 'Start with 5 lives', '5 lives; first miss costs no life'], prices: [200, 500, 1000] },
+  { id: 'lives', name: 'Start lives', fact: 'More lives at the start of each run', ranks: ['Start with 4 lives', 'Start with 5 lives', parts('5 lives', 'first miss is free')], prices: [200, 500, 1000] },
   { id: 'heat', name: 'HEAT size', fact: 'Store more HEAT', ranks: ['Stores up to 120 HEAT', 'Stores up to 140 HEAT', 'Stores up to 160 HEAT'], prices: [150, 400, 800] },
-  { id: 'paddle', name: 'Paddle width', fact: 'Wider starting paddle', ranks: ['Starting width: 120 → 130', 'Starting width: 130 → 140', 'Starting width: 140 → 150'], prices: [150, 400, 800] },
+  { id: 'paddle', name: 'Paddle width', fact: 'Wider starting paddle', ranks: ['Paddle 8% wider', 'Paddle 17% wider', 'Paddle 25% wider'], prices: [150, 400, 800] },
   { id: 'embers', name: 'Ember value', fact: 'More embers saved for The Forge', ranks: ['Banks 25% more embers', 'Banks 50% more embers', 'Banks twice the embers'], prices: [250, 600, 1200] },
-  { id: 'overload', name: 'Overload power', fact: 'Stronger effects; shorter HEAT cooldown', ranks: ['HEAT paused 10 s; Purge 4 rows; Quench 4 s', 'HEAT paused 8 s; Quench 5 s; Fork: 3 per ball', 'HEAT paused 6 s; Purge 5 rows; Quench 6 s'], prices: [200, 500, 1000] },
+  { id: 'overload', name: 'Overload power', fact: 'Stronger Overloads · shorter HEAT pause', ranks: [parts('HEAT pause 2 s shorter', 'Purge +1 row', 'Quench +1 s'), parts('HEAT pause 4 s shorter', 'Purge +1 row', 'Quench +2 s', 'Fork into 3'), parts('HEAT pause 6 s shorter', 'Purge +2 rows', 'Quench +3 s', 'Fork into 3')], prices: [200, 500, 1000] },
   { id: 'ball', name: 'Ball type', fact: 'Unlock a choice of starting ball', ranks: ['Heavy: 10% slower, 2 damage', 'Splitter: perfect hits add a ball, max 3', 'Sniper: always shows the aim line'], prices: [300, 700, 1400] },
 ].map((it) => Object.freeze({ ...it, max: it.ranks.length, ranks: Object.freeze(it.ranks), prices: Object.freeze(it.prices) })));
 

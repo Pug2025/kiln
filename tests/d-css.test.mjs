@@ -69,6 +69,24 @@ test('HUD: no panel or blur, the score keeps its gradient (shadow by filter, not
   assert.ok(score && /text-shadow:\s*none/.test(score.body), 'the clipped gradient score has no text-shadow');
 });
 
+test('HUD: an empty fact under HEAT keeps one line of height, and no later rule changes its size', () => {
+  // the HUD keeps the row on every level so the power labels below never move (a Pull press, the
+  // level-end count); an empty block would collapse to 0 px, so an empty fact holds a no-break space
+  // in the row's own font: exactly the height of a fact (a min-height of 1em measured 0.01 px short
+  // at 1280)
+  const all = rules(hud).filter((r) => /\.boss-fact\b/.test(r.sel));
+  const base = all.find((r) => r.sel === '.boss-fact' && !r.media);
+  assert.ok(base, 'the .boss-fact rule');
+  const blank = all.find((r) => r.sel === '.boss-fact:empty::before' && !r.media);
+  assert.ok(blank, 'an empty fact keeps a line');
+  assert.match(blank.body, /^\s*content:\s*'\\a0';\s*$/, 'only a no-break space, in the row\'s own font');
+  for (const r of all) {
+    if (r === base) continue;
+    assert.ok(!/(^|;)\s*(min-height|height|max-height|font|font-size|line-height|white-space|display):/.test(r.body) || r.sel === '.boss-fact[hidden]',
+      `${r.media} ${r.sel}: no other size for the row`);
+  }
+});
+
 const pxSize = (body) => {
   const m = /font:\s*(\d+)\s+(\d+(?:\.\d+)?)px/.exec(body);
   if (m) return { weight: Number(m[1]), px: Number(m[2]) };

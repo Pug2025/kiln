@@ -87,7 +87,7 @@ const LEVELS = [
     pick: 'mod',
     gate: true,
     adds: 'Mod pick',
-    hint: 'Choose 1 of 3 Mods. It lasts for this run.',
+    hint: '',
     rows: [
       '....cccc....',
       '....cAAc....',
@@ -141,7 +141,7 @@ const LEVELS = [
     mode: 'bottom',
     tier: 1,
     gate: true,
-    adds: 'Bonus: multiball rain',
+    adds: 'Multiball rain',
     hint: 'A new ball falls every 1.5 seconds. Misses cost no lives.',
     rows: [
       '222222222222',
@@ -229,7 +229,7 @@ const LEVELS = [
     tier: 2,
     gate: true,
     adds: 'Sentry drones',
-    hint: 'Sentries take 2 hits; bombers 3. Lasers or perfect hits kill either.',
+    hint: 'Sentries take 2 hits, bombers 3. Lasers or perfect hits kill either.',
     rows: [
       '...bbccbb...',
       '..2bbccbb2..',
@@ -292,7 +292,7 @@ const LEVELS = [
     mode: 'bottom',
     tier: 2,
     gate: true,
-    adds: 'Boss: The Crucible',
+    adds: 'Turning ring',
     hint: 'The gap leads to the core. At half health, the ring reverses.',
     rows: [
       '............',

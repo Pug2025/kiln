@@ -49,7 +49,7 @@ test('HUD: opening power cells have a name and effect; repeated spawns do not re
   try {
     hud.openingDrop(DROP.WIDE, false, 0, 100);
     assert.equal(key('dropName').textContent, 'Wide drop');
-    assert.equal(key('dropEffect').textContent, 'Longer paddle');
+    assert.equal(key('dropEffect').textContent, 'Wider paddle');
     assert.equal(key('dropFact').hidden, false);
     assert.equal(key('dropFact').getAttribute('role'), 'status');
     assert.equal(key('dropFact').getAttribute('aria-atomic'), 'true');

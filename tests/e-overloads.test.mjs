@@ -125,18 +125,28 @@ test('the Overload pick cards state the run\'s own power (The Forge ranks), not 
   }
 });
 
-test('The Forge\'s Overload facts say what each rank changes, in the tuning\'s numbers', () => {
+test('The Forge\'s Overload facts give each rank\'s total from no upgrade, in the tuning\'s numbers', () => {
   const it = FORGE_ITEMS.find((x) => x.id === 'overload');
+  const facts = it.ranks.map((f) => f.replace(/ /g, ' ')); // parts are kept whole with no-break spaces
+  assert.equal(new Set(facts).size, facts.length, 'no two ranks read the same');
   for (let rank = 1; rank <= 3; rank++) {
-    const fact = it.ranks[rank - 1];
+    const fact = facts[rank - 1];
     const has = (s) => assert.ok(fact.includes(s), `rank ${rank} "${fact}" says "${s}"`);
-    assert.match(fact, new RegExp(`HEAT.*${FORGE_FX.VENT_MS[rank] / 1000} s`));
-    if (FORGE_FX.PURGE_ROWS[rank] !== FORGE_FX.PURGE_ROWS[rank - 1]) has(`Purge ${FORGE_FX.PURGE_ROWS[rank]} rows`);
-    else assert.ok(!fact.includes('Purge'), `rank ${rank} does not claim a Purge step`);
-    if (FORGE_FX.QUENCH_MS[rank] !== FORGE_FX.QUENCH_MS[rank - 1]) has(`Quench ${FORGE_FX.QUENCH_MS[rank] / 1000} s`);
-    if (FORGE_FX.FORK_EXTRA[rank] !== FORGE_FX.FORK_EXTRA[rank - 1]) assert.match(fact, new RegExp(`Fork.*${FORGE_FX.FORK_EXTRA[rank] + 1}`));
-    else assert.ok(!fact.includes('Fork'), `rank ${rank} does not claim a Fork step`);
-    assert.ok(!/cost/i.test(fact), 'no cost claim: the Forge does not change it');
+    // The Forge shows the next rank's fact, and the top rank's once maxed, so each fact is the
+    // total against no upgrade (like 'Paddle 17% wider'), never a step from the rank before.
+    const total = (t) => t[rank] - t[0];
+    const vent = -total(FORGE_FX.VENT_MS) / 1000, rows = total(FORGE_FX.PURGE_ROWS);
+    const quench = total(FORGE_FX.QUENCH_MS) / 1000, fork = total(FORGE_FX.FORK_EXTRA);
+    assert.ok(vent > 0, 'every rank shortens the HEAT pause');
+    has(`HEAT pause ${vent} s shorter`);
+    if (rows) has(`Purge +${rows} row${rows === 1 ? '' : 's'}`);
+    else assert.ok(!fact.includes('Purge'), `rank ${rank} does not claim more Purge rows`);
+    if (quench) has(`Quench +${quench} s`);
+    else assert.ok(!fact.includes('Quench'), `rank ${rank} does not claim a longer Quench`);
+    // splitBalls(n) makes every ball n + 1, as that rank's pick card says ('Splits each ball into three')
+    if (fork) has(`Fork into ${FORGE_FX.FORK_EXTRA[rank] + 1}`);
+    else assert.ok(!fact.includes('Fork'), `rank ${rank} does not claim a bigger Fork`);
+    assert.ok(!/cost|;|−/i.test(fact), 'no cost claim (the Forge does not change it), no semicolon fragments, no minus signs');
   }
 });
 

@@ -20,6 +20,10 @@ import { SCREENS } from './screens/index.js';
 
 const EXIT_MS = 120;
 const ENTER_MS = 180;
+// CSS px of air kept round the level card's box when it is placed: the card is placed on the
+// rest camera's field box, and the live camera (intro dolly, lean, roll) and the box's straight
+// mapping of the tilted field move the lintel and the lane a few px against it
+const CARD_AIR = 8;
 const SCREEN_LABELS = Object.freeze({
   title: 'Kiln', map: 'Levels', forge: 'The Forge', guide: 'How to play', settings: 'Settings',
   pause: 'Paused', results: 'Results', credits: 'Credits', pick: 'Choose an upgrade', gate: 'Choose a route',
@@ -27,8 +31,9 @@ const SCREEN_LABELS = Object.freeze({
 
 /**
  * @param {HTMLElement} root
- * @param {{reduceMotion?:() => boolean}} [ctx]
- * @returns {import('../core/types.js').UI & {current:string|null, card(data:object|null):void, setHudVisible(on:boolean):void, refresh():void}}
+ * @param {{reduceMotion?:() => boolean, pulled?:() => boolean, onPulled?:() => void}} [ctx]
+ *   `pulled` / `onPulled`: the saved "has used Pull" help flag, read and set by the HUD
+ * @returns {import('../core/types.js').UI & {current:string|null, card(data:object|null, cut?:boolean):void, setHudVisible(on:boolean):void, refresh():void}}
  */
 export function createUI(root, ctx = {}) {
   const reduceMotion = ctx.reduceMotion || (() => false);
@@ -37,6 +42,8 @@ export function createUI(root, ctx = {}) {
   const hud = createHud(root, {
     onPause: () => ctx.onPause && ctx.onPause(),
     onMute: () => ctx.onMute && ctx.onMute(),
+    pulled: () => !!(ctx.pulled && ctx.pulled()),
+    onPulled: () => ctx.onPulled && ctx.onPulled(),
   });
   const layer = document.createElement('div');
   layer.className = 'screens';
@@ -55,8 +62,18 @@ export function createUI(root, ctx = {}) {
   /** @type {{name:string, el:HTMLElement, nav:any, onBack?:Function, dispose?:Function, keys?:Function}|null} */
   let cur = null;
   let card = null;
+  let cardBands = null; // the open card's places (layout.js cardBands), for a new field box
   let toastTimer = 0;
   let hudWanted = false;
+
+  /** Set the level card's place in the field box from its height (one layout read). */
+  function placeCard(el, bands) {
+    if (!bands || !(fieldRect.h > 0)) return;
+    const fieldY = fieldRect.fieldY || 0;
+    const fieldH = fieldRect.fieldH || 1080;
+    const units = ((el.offsetHeight + 2 * CARD_AIR) * fieldH) / fieldRect.h;
+    el.style.setProperty('--card-fy', String((cardCentre(bands, units, fieldY, fieldY + fieldH) - fieldY) / fieldH));
+  }
 
   function updateHudVisibility() {
     hud.setVisible(hudWanted && !cur);
@@ -130,32 +147,42 @@ export function createUI(root, ctx = {}) {
       updateHudVisibility();
     },
 
-    /** The level card: a glass overlay over the live world that never takes input. */
-    card(data) {
+    /**
+     * The level card: a glass overlay over the live world that never takes input. `cut`: close
+     * it at once instead of fading (the ball was launched; it never flies under a fading card).
+     */
+    card(data, cut = false) {
       if (card) {
         const old = card;
         card = null;
         old.classList.remove('in');
         old.classList.add('out');
+        if (cut) old.classList.add('cut');
         setTimeout(() => old.remove(), EXIT_MS);
       }
       if (!data) return;
       const el = SCREENS.card(data, { fieldRect });
+      const bands = data.bands;
+      // Its horizontal room (horizontal mode: between the paddle's track and the far wall, so the
+      // far wall's lintel never runs through it) as fractions of the field box: style writes
+      // only, so the read below measures the card at the width it shows at.
+      if (bands && Number.isFinite(bands.x0) && Number.isFinite(bands.x1)) {
+        const fieldX = fieldRect.fieldX || 0;
+        const fieldW = fieldRect.fieldW || 720;
+        el.style.setProperty('--card-ax', String((bands.x0 - fieldX) / fieldW));
+        el.style.setProperty('--card-bx', String((bands.x1 - fieldX) / fieldW));
+      }
       cardLayer.appendChild(el);
       card = el;
-      // Place it in an empty band of the field (above or under the formation) with one layout read
-      // as it fades in, never per frame. It is read in the next frame's first callback, after the
+      cardBands = bands;
+      // Place it in the chamber's open band (layout.js cardBands) with one layout read as it
+      // fades in, never per frame. It is read in the next frame's first callback, after the
       // browser has laid this frame out, so it costs no layout of its own; read here it forced
       // one for the whole page in the middle of a world change (item 23). A card closed before
       // then is never measured. It shows at opacity 0 until 'in', so nothing moves on screen.
       requestAnimationFrame(() => {
         if (card !== el) return;
-        if (data.bands && fieldRect.h > 0) {
-          const fieldY = fieldRect.fieldY || 0;
-          const fieldH = fieldRect.fieldH || 1080;
-          const units = (el.offsetHeight * fieldH) / fieldRect.h;
-          el.style.setProperty('--card-fy', String((cardCentre(data.bands, units, fieldY, fieldY + fieldH) - fieldY) / fieldH));
-        }
+        placeCard(el, bands);
         el.classList.add('in');
       });
     },
@@ -207,6 +234,13 @@ export function createUI(root, ctx = {}) {
       cardLayer.style.setProperty('--field-y', `${rect.y}px`);
       cardLayer.style.setProperty('--field-w', `${rect.w}px`);
       cardLayer.style.setProperty('--field-h', `${rect.h}px`);
+      // A new field box under a card that is up (a refit for the touch Overload button or the
+      // HUD, fonts, a turned phone): place it again by its new width and height. Read two frames
+      // on, once the page has been laid out with the new box, so the read costs no layout.
+      if (card && card.classList.contains('in')) {
+        const el = card;
+        requestAnimationFrame(() => requestAnimationFrame(() => { if (card === el) placeCard(el, cardBands); }));
+      }
       if (cur) cur.nav.refresh();
     },
 

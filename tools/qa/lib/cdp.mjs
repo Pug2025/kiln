@@ -123,7 +123,7 @@ export function findChrome() {
  * launch); with `keepProfile` that folder survives close() and the guard, otherwise it goes with
  * the browser like a throwaway one.
  * @param {{headless?:boolean, width?:number, height?:number, args?:string[], chrome?:string,
- *   profile?:string, keepProfile?:boolean}} [opts]
+ *   profile?:string, keepProfile?:boolean, throttle?:boolean}} [opts]
  */
 export async function launchChrome(opts = {}) {
   const profile = opts.profile || mkdtempSync(join(tmpdir(), 'kiln-chrome-'));
@@ -136,9 +136,12 @@ export async function launchChrome(opts = {}) {
     '--remote-debugging-address=127.0.0.1',
     '--no-first-run',
     '--no-default-browser-check',
-    '--disable-background-timer-throttling',
-    '--disable-renderer-backgrounding',
-    '--disable-backgrounding-occluded-windows',
+    // `throttle` keeps Chrome's normal background-tab throttling (a check of what a real background tab does)
+    ...(opts.throttle ? [] : [
+      '--disable-background-timer-throttling',
+      '--disable-renderer-backgrounding',
+      '--disable-backgrounding-occluded-windows',
+    ]),
     '--disable-extensions',
     '--disable-component-update',
     '--disable-sync',

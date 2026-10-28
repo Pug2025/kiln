@@ -72,6 +72,7 @@ const INSTALL_KEY = 'kiln.install.v1'; // date of the last install offer (YYYY-M
 const END_DELAY_MS = 1500;   // real ms between the clear (after A's ceremony) and the results
 const STAGE_DELAY_MS = 600;  // The Core: next stage starts after this
 const CARD_MS = 2600;        // level card stays at most this long (or until the ball launches)
+const PICK_ADDS = Object.freeze({ mod: 'Mod pick', overload: 'Overload pick' }); // map labels for pick levels
 const ATTRACT = [1, 2, 3, 4, 6, 7, 8, 9]; // attract-mode levels behind the menus (when built)
 
 const clone = (o) => (typeof structuredClone === 'function' ? structuredClone(o) : JSON.parse(JSON.stringify(o)));
@@ -103,6 +104,9 @@ export async function boot(startup = null) {
     sound: (name) => { if (audio && audio.ui) audio.ui(name); },
     onPause: () => pause('user'),
     onMute: () => toggleMute(),
+    // the Pull tip under HEAT shows until the player first pulls (saved with the other help)
+    pulled: () => !!seen.pulled,
+    onPulled: () => { if (!seen.pulled) { seen.pulled = true; writeSeen(seen); } },
   });
   ui.setMuted(!!settings.muted);
   let renderer = null;
@@ -170,7 +174,25 @@ export async function boot(startup = null) {
     view.style.setProperty('--view-top', `${own ? top : 0}px`);
     view.style.setProperty('--view-bottom', `${own ? bottom : 0}px`);
     renderer.resize();
-    renderer.fieldRect(rect);
+    fieldBox(rect);
+  }
+
+  /**
+   * The field's box as play shows it. renderer.fieldRect reads it off the canvas, which eases a 6%
+   * scale under a blurred menu (renderer applyMenu, 120 ms back): measured from #view, which holds
+   * the canvas unscaled, so a box read under a menu is the one play settles on. Read under the
+   * scale, it put a level card opened from a screen (results Next, a gate door, a Mod pick) 21 to
+   * 33 px off, and the next check (checkFieldRect) moved it twice while it showed.
+   */
+  function fieldBox(out) {
+    renderer.fieldRect(out);
+    // also while the scale eases back (the style is already cleared): the offset is 0 at rest
+    const c = view.querySelector('.kiln-canvas');
+    if (!c) return out;
+    const cr = c.getBoundingClientRect(), vr = view.getBoundingClientRect();
+    out.x += vr.left - cr.left;
+    out.y += vr.top - cr.top;
+    return out;
   }
 
   /** The touch Overload button shows in this world (coarse pointer, a HEAT level, the player's). */
@@ -206,13 +228,21 @@ export async function boot(startup = null) {
     if (app.flame && app.flame.resize) app.flame.resize();
   }
 
-  /** The renderer may refit after a load or a mode change: re-glue the HUD when the rect moves. */
+  /**
+   * The renderer refit the field since the last layout: its box moved, or it frames another range
+   * of the field (a level with another ceiling: the HUD and the level card map field units by it).
+   */
   const probe = { x: 0, y: 0, w: 0, h: 0, scale: 1 };
+  function boxMoved() {
+    fieldBox(probe);
+    return Math.abs(probe.x - rect.x) > 0.5 || Math.abs(probe.y - rect.y) > 0.5 || Math.abs(probe.w - rect.w) > 0.5
+      || Math.abs(probe.h - rect.h) > 0.5 || probe.fieldY !== rect.fieldY || probe.fieldH !== rect.fieldH;
+  }
+  /** The renderer may refit after a load or a mode change: re-glue the HUD when the rect moves. */
   function checkFieldRect() {
     if (!renderer) return;
-    renderer.fieldRect(probe);
     // a refit can change what the HUD band and the Overload button need: the whole layout again
-    if (Math.abs(probe.x - rect.x) > 0.5 || Math.abs(probe.y - rect.y) > 0.5 || Math.abs(probe.w - rect.w) > 0.5) layout();
+    if (boxMoved()) layout();
   }
   setInterval(checkFieldRect, 500);
 
@@ -307,8 +337,11 @@ export async function boot(startup = null) {
     renderer.setWorld(world);
     if (!attract) audio.setWorld(world); // menus: no game sounds from the attract world
     // the renderer refits for the world's field mode, and the Overload button's room comes and goes
-    // with HEAT: lay out again (with the reserves) when either changes, not for every attract world
-    if (trayWanted() !== !!app.tray || world.level.mode !== app.layoutMode) layout();
+    // with HEAT: lay out again (with the reserves) when either changes, not for every attract world.
+    // A player's world with another ceiling is framed afresh in the same mode: lay out when the
+    // box moved, so the HUD and its level card start on it (renderer.setWorld has just resized,
+    // so the read costs no layout of its own), not on the last level's until checkFieldRect.
+    if (trayWanted() !== !!app.tray || world.level.mode !== app.layoutMode || (!attract && boxMoved())) layout();
     else if (renderer.detailInfo) renderer.detailInfo(world.readability);
     resetReader(uiEvents, world.bus, world.bus.head);
     ui.resetHud();
@@ -349,14 +382,18 @@ export async function boot(startup = null) {
     const rules = app.world?.level.rules || def.rules || {};
     const controls = controlHints(rules, seen, touch);
     if (controls.length) writeSeen(seen);
+    // the pick screen came just before: a card that only names that pick ('Mod pick') says nothing
+    // new, so it is left off here (the level map still shows it); real adds on pick levels stay
+    const namesPick = !!def.pick && def.adds === PICK_ADDS[def.pick];
     ui.card({
       n: def.n > 30 ? app.wave : def.n,
       kicker: def.world === 'overburn' ? 'Overburn' : def.stage > 1 ? `Level ${String(def.n).padStart(2, '0')}  ·  Stage ${def.stage}` : '',
       name: def.world === 'overburn' ? `Wave ${app.wave}` : def.name,
       kind: def.kind || kindOf(def.n),
-      adds: controls.length ? '' : def.adds || '',
+      adds: controls.length || namesPick ? '' : def.adds || '',
       door: def.twist ? app.door || '' : '',
-      hint: controls.length ? controls.join('  ') : def.hint,
+      // one control per line, so a first HEAT card reads as two short lines
+      hint: controls.length ? controls : def.hint,
       controls: controls.length > 0,
       bands: app.world ? cardBands(app.world) : null,
     });
@@ -422,7 +459,7 @@ export async function boot(startup = null) {
     const forged = Object.values(data.forge.ranks || {}).reduce((a, v) => a + (v | 0), 0);
     const stats = [];
     if (cleared) stats.push({ label: 'Cleared', value: `${cleared}/30` });
-    if (data.forge.embers) stats.push({ label: 'Embers', value: formatScore(data.forge.embers) });
+    if (data.forge.embers) stats.push({ label: 'Forge wallet', value: formatScore(data.forge.embers) });
     if (forged) stats.push({ label: 'Upgrades', value: String(forged) });
     if (data.overburn.bestWave) stats.push({ label: 'Overburn', value: `Wave ${data.overburn.bestWave}` });
     const world = worldOf(n);
@@ -493,7 +530,7 @@ export async function boot(startup = null) {
   function showCredits(back) {
     ui.show('credits', {
       lines: ext.creditLines(),
-      extra: ['Type: Inter and Inter Tight by Rasmus Andersson, SIL Open Font License.', '3D: three.js, MIT License.'],
+      extra: ['Type: Inter and Inter Tight by Rasmus Andersson, SIL Open Font License.'],
       onBack: back,
     });
   }
@@ -912,9 +949,13 @@ export async function boot(startup = null) {
         if (app.attract) startAttract();
         else if (app.mode === 'play') onWorldEnd();
       }
-      if (app.mode === 'play' && app.cardUntil && (w.phase !== 'serve' || now > app.cardUntil)) {
+      // the card belongs to the world that is current now: after a handover above (The Core's
+      // next stage) `w` is the cleared stage, and reading it here closed the new stage's card
+      // in the frame that opened it, so stage 2 and 3 never showed theirs
+      if (app.mode === 'play' && app.cardUntil && (app.world.phase !== 'serve' || now > app.cardUntil)) {
         app.cardUntil = 0;
-        ui.card(null);
+        // a launch takes the card away at once (no fade), so the ball never flies under it
+        ui.card(null, app.world.phase !== 'serve');
       }
     }
     // the HUD, sounds and the Overload button follow the world that is current now

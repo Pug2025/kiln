@@ -163,7 +163,7 @@ const LEVELS = [
     pick: 'overload',
     gate: true,
     adds: 'Overload pick',
-    hint: 'Choose an Overload. Using it spends all your HEAT.',
+    hint: '',
     rows: [
       '............',
       'cccccccccccc',
@@ -195,7 +195,7 @@ const LEVELS = [
     pick: 'mod',
     gate: true,
     adds: 'Thru and Mega',
-    hint: 'Thru passes through bricks. Mega drops after 20 s at 5 or fewer left.',
+    hint: 'Thru passes through bricks. Mega can drop when few bricks are left.',
     rows: [
       '............',
       '...aaaaaa...',
@@ -240,7 +240,7 @@ const LEVELS = [
     mode: 'bottom',
     tier: 2,
     gate: true,
-    adds: 'Bonus: Fever',
+    adds: 'Splitting balls',
     hint: 'Balls split on brick hits, up to 12. Misses cost no lives.',
     rows: [
       '............',
@@ -363,7 +363,7 @@ const LEVELS = [
     mode: 'bottom',
     tier: 3,
     pick: 'mod',
-    adds: 'Moving wall and sentries',
+    adds: 'Marching wall and sentries',
     hint: 'New rows push the wall down every 12 seconds.',
     rows: [
       '............',
@@ -391,8 +391,8 @@ const LEVELS = [
     boss: 'core',
     mode: 'bottom',
     tier: 2,
-    adds: 'Final boss: The Core',
-    hint: 'Three stages: bottom, left, then ring. Gaps expose the core.',
+    adds: 'Three stages',
+    hint: 'Gaps expose the core.',
     continues: 'core-2',
     rows: [
       '............',
