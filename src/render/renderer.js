@@ -365,22 +365,24 @@ export async function createRenderer(host, opts = {}) {
 
   /** Reveal hidden variants only during a synchronous transaction, never across an await. */
   function withWarmScene(operation) {
-    unifyStandardMaterials(scene, M.tex);
-    const previousTarget = gl.getRenderTarget();
-    const hidden = [];
-    scene.traverse((o) => {
-      if (!o.visible) { hidden.push(o); o.visible = true; }
+    return actors.withWarmPaddleMaterials(() => {
+      unifyStandardMaterials(scene, M.tex);
+      const previousTarget = gl.getRenderTarget();
+      const hidden = [];
+      scene.traverse((o) => {
+        if (!o.visible) { hidden.push(o); o.visible = true; }
+      });
+      try {
+        gl.initTexture(M.tex.neutralMap);
+        gl.initTexture(M.tex.neutralNormal);
+        actors.warmTextures(gl);
+        gl.setRenderTarget(post.composer.renderTarget1);
+        return operation();
+      } finally {
+        gl.setRenderTarget(previousTarget);
+        for (const o of hidden) o.visible = false;
+      }
     });
-    try {
-      gl.initTexture(M.tex.neutralMap);
-      gl.initTexture(M.tex.neutralNormal);
-      actors.warmTextures(gl);
-      gl.setRenderTarget(post.composer.renderTarget1);
-      return operation();
-    } finally {
-      gl.setRenderTarget(previousTarget);
-      for (const o of hidden) o.visible = false;
-    }
   }
 
   /** Runtime swaps/quality/restores remain synchronous, without a pending gameplay draw gate. */
@@ -391,6 +393,8 @@ export async function createRenderer(host, opts = {}) {
         gl.compile(scene, camera);
         actors.warmPrograms(gl);
         post.warmUp();
+        preflightScene();
+        actors.warmPrograms(gl);
       });
     } catch (e) {
       console.warn('[kiln] shader warm-up', e);
@@ -419,6 +423,9 @@ export async function createRenderer(host, opts = {}) {
       // Pinned r160 sets programs and VAOs before its zero-instance draw. Leave pool counts,
       // instance matrices, world state and clocks untouched; even an empty pool is prepared.
       gl.render(scene, camera);
+      // The second permutation prepares blade geometry with the retained clipped program too.
+      // One split alone would defer that VAO until the first left-mode frame.
+      actors.withWarmPaddleMaterials(() => gl.render(scene, camera), true);
     } finally {
       for (const object of culled) object.frustumCulled = true;
       // Sorting may cache an empty pool's bounds before its first real contents arrive.
@@ -463,6 +470,7 @@ export async function createRenderer(host, opts = {}) {
         const preflightStart = performance.now();
         preflightScene();
         preflightMs = performance.now() - preflightStart;
+        actors.warmPrograms(gl);
         // First-use clipping can acquire additional programs beyond public compile's set.
         for (const program of gl.info.programs) {
           if (!native.getProgramParameter(program.program, native.LINK_STATUS)) {
@@ -798,6 +806,7 @@ export async function createRenderer(host, opts = {}) {
       scene.environment?.dispose();
       scene.environment = null;
       post.dispose();
+      actors.dispose();
       gl.dispose();
       canvas.remove();
       vignette.remove();

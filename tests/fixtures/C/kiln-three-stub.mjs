@@ -15,7 +15,15 @@ export class Mesh extends Group {
 }
 export class Matrix4 extends MarkMatrix4 {
   makeTranslation(x, y, z) { this.makeScale(1, 1, 1); return this.setPosition(x, y, z); }
+  makeRotationZ(angle) { this.value = [0, 0, 0, angle, 1, 1, 1]; return this; }
   setPosition(x, y, z) { this.value[0] = x; this.value[1] = y; this.value[2] = z; return this; }
+  premultiply(outer) {
+    const [x, y, z, angle, sx, sy, sz] = this.value;
+    const [ox, oy, oz, turn, ax, ay, az] = outer.value, c = Math.cos(turn), s = Math.sin(turn);
+    this.value = [ox + c * ax * x - s * ay * y, oy + s * ax * x + c * ay * y,
+      oz + az * z, angle + turn, ax * sx, ay * sy, az * sz];
+    return this;
+  }
 }
 export class InstancedMesh extends Mesh {
   constructor(geometry, material, capacity) {

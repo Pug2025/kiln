@@ -16,9 +16,10 @@ const factory = new Function('env', `with (env) {
   };
 }`);
 
-function fixture({ khr=true, link=true, compileError=false, renderError=false, lateLinkFailure=false }={}) {
+function fixture({ khr=true, link=true, compileError=false, renderError=false, lateLinkFailure=false, normalizeError=false }={}) {
   const trace=[], hidden={visible:false,frustumCulled:true,count:0,boundingSphere:null,boundingBox:null}, visible={visible:true,frustumCulled:false,count:7}, target={}, caller={};
-  let current=caller, pending=null, now=0, ready=false;
+  let current=caller, pending=null, now=0, ready=false, paddlePhase='active';
+  const preflightModes=[];
   let viewport=[2,3,400,300], scissor=[4,5,200,100], scissorTest=false;
   class Vector4 { data=[]; }
   const scheduler={now:()=>now, setTimeout(fn) { assert.equal(pending,null); pending=fn; return 1; }, clearTimeout() { pending=null; }};
@@ -37,20 +38,23 @@ function fixture({ khr=true, link=true, compileError=false, renderError=false, l
       assert.equal(hidden.visible,true);assert.equal(hidden.frustumCulled,false);assert.equal(visible.frustumCulled,false);
       assert.deepEqual([hidden.count,visible.count],[0,7]);assert.deepEqual(viewport,[0,0,1,1]);assert.deepEqual(scissor,[0,0,1,1]);assert.equal(scissorTest,true);
       hidden.boundingSphere={empty:true};hidden.boundingBox={empty:true};
-      trace.push('preflight');if(lateLinkFailure)gl.info.programs.push(lateProgram);if(renderError)throw Error('injected preflight failure');
+      preflightModes.push(paddlePhase);trace.push('preflight');
+      if(lateLinkFailure)gl.info.programs.push(lateProgram);
+      if(renderError===true||renderError===preflightModes.length)throw Error('injected preflight failure');
     }, getRenderTarget:()=>current, setRenderTarget(value) { current=value; }, initTexture() {},
     getContext:()=>native, properties:{ get:()=>({programs:new Map([['variant',program]]),currentProgram:program}) },
-    compile(s,c) { assert.equal(s,scene); assert.equal(c,camera); assert.equal(current,target); assert.equal(hidden.visible,true); trace.push('compile'); if(compileError)throw Error('injected compile failure'); return new Set([material]); } };
+    compile(s,c) { assert.equal(s,scene); assert.equal(c,camera); assert.equal(current,target); assert.equal(hidden.visible,true);assert.equal(paddlePhase,'bottom'); trace.push('compile'); if(compileError)throw Error('injected compile failure'); return new Set([material]); } };
   const post={composer:{renderTarget1:target},warmUp() { assert.equal(current,target); trace.push('post'); }};
   const stats={preparation:{}};
   const api=factory({THREE:{Vector4},scene,camera,gl,post,stats,glWatch:{lost:false},M:{tex:{}},
-    actors:{warmTextures(){trace.push('textures');},warmPrograms(){trace.push('actors');}},
-    unifyStandardMaterials(){},performance:{now:()=>now},
+    actors:{warmTextures(){trace.push('textures');},warmPrograms(){trace.push('actors');},
+      withWarmPaddleMaterials(operation,legacyBlade=false){const previous=paddlePhase;paddlePhase=legacyBlade?'legacy':'bottom';try{return operation();}finally{paddlePhase=previous;}}},
+    unifyStandardMaterials(){assert.equal(paddlePhase,'bottom');if(normalizeError)throw Error('injected normalization failure');},performance:{now:()=>now},
     submitShaderPreparation:(g,s,c,o)=>submitShaderPreparation(g,s,c,{...o,scheduler}),
   });
-  return {api,trace,stats,hidden,visible,
+  return {api,trace,stats,hidden,visible,preflightModes,
     restored(){assert.equal(current,caller);assert.equal(hidden.visible,false);assert.equal(visible.visible,true);assert.equal(hidden.frustumCulled,true);assert.equal(visible.frustumCulled,false);
-      assert.deepEqual([hidden.count,visible.count],[0,7]);assert.deepEqual(viewport,[2,3,400,300]);assert.deepEqual(scissor,[4,5,200,100]);assert.equal(scissorTest,false);assert.equal(gl.autoClear,false);assert.equal(hidden.boundingSphere,null);assert.equal(hidden.boundingBox,null);},
+      assert.equal(paddlePhase,'active');assert.deepEqual([hidden.count,visible.count],[0,7]);assert.deepEqual(viewport,[2,3,400,300]);assert.deepEqual(scissor,[4,5,200,100]);assert.equal(scissorTest,false);assert.equal(gl.autoClear,false);assert.equal(hidden.boundingSphere,null);assert.equal(hidden.boundingBox,null);},
     complete(){ready=true;const fn=pending;pending=null;now+=10;fn();},
     poll(){const fn=pending;pending=null;now+=10;fn();},
     get pending(){return pending;},
@@ -62,7 +66,8 @@ test('boot restores visibility and linear target before awaiting completion, the
   f.restored();assert.deepEqual(f.trace,['textures','compile']);
   f.poll();f.restored();assert.deepEqual(f.trace,['textures','compile','completion']);
   f.complete();await done;f.restored();
-  assert.deepEqual(f.trace,['textures','compile','completion','completion','textures','link','uniforms','attributes','actors','post','preflight','link']);
+  assert.deepEqual(f.trace,['textures','compile','completion','completion','textures','link','uniforms','attributes','actors','post','preflight','preflight','actors','link']);
+  assert.deepEqual(f.preflightModes,['bottom','legacy']);
   assert.equal(f.stats.preparation.capability,'parallel');assert.equal(f.stats.preparation.programs,1);
   assert.equal(f.pending,null);
 });
@@ -91,8 +96,23 @@ test('boot submission and real link failures reject to startup recovery and rest
 
 
 test('first-use preflight failure restores culling, zero pool counts and caller graphics state before rejecting',async()=>{
-  const f=fixture({renderError:true}),done=f.api.prepareBoot();f.complete();
-  await assert.rejects(done,/preflight failure/);f.restored();assert.equal(f.pending,null);
+  for(const pass of [1,2]){
+    const f=fixture({renderError:pass}),done=f.api.prepareBoot();f.complete();
+    await assert.rejects(done,/preflight failure/);f.restored();assert.equal(f.pending,null);
+    assert.equal(f.preflightModes.length,pass);
+  }
+});
+
+test('normalization failure restores the material transaction before boot can submit',async()=>{
+  const f=fixture({normalizeError:true});await assert.rejects(f.api.prepareBoot(),/normalization failure/);
+  f.restored();assert.deepEqual(f.trace,[]);assert.equal(f.pending,null);
+});
+
+test('runtime preparation submits both geometry permutations and reflects after real preflight',()=>{
+  const f=fixture();f.api.warmUp();f.restored();
+  assert.deepEqual(f.preflightModes,['bottom','legacy']);
+  assert.deepEqual(f.trace,['textures','compile','actors','post','preflight','preflight','actors']);
+  assert.equal(f.pending,null,'runtime preparation stays synchronous');
 });
 
 

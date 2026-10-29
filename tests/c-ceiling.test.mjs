@@ -96,6 +96,11 @@ test('real kiln mode changes reuse the lintel, clip the outline and clear contac
   const kiln = createKiln(scene, { wallGlass: plain, titaniumP: plain, ribs: plain, pillars: plain, grate: {}, tex: { glow: {} } });
   const pool = kiln.ceilingBar, glow = kiln.ceilingGlow, geometry = pool.geometry, material = pool.material;
   const walls = kiln.frame.children.slice(0, 4);
+  assert.equal(new Set(walls.map(wall => wall.geometry)).size, 4, 'opposite walls own their translated geometry');
+  assert.deepEqual(walls.map(wall => wall.geometry.translation), [
+    [-(FIELD.W / 2 + 6), 0, 0], [FIELD.W / 2 + 6, 0, 0],
+    [0, FIELD.H / 2 + 6, 0], [0, -(FIELD.H / 2 + 6), 0],
+  ]);
   const sill = scene.children.find((mesh) => mesh !== pool && mesh.material?.metalness === .7);
   assert.ok(sill, 'existing forged sill remains');
   assert.notEqual(material, sill.material, 'plain and instanced meshes keep separate program state');
@@ -107,7 +112,17 @@ test('real kiln mode changes reuse the lintel, clip the outline and clear contac
     assert.equal(kiln.ceilingBar, pool); assert.equal(pool.geometry, geometry); assert.equal(pool.material, material);
     assert.equal(pool.visible, mode !== 'ring'); assert.equal(glow.visible, mode !== 'ring');
     assert.equal(pool.count > 0, mode !== 'ring', 'renderer draws only nonempty instance pools');
+    assert.deepEqual([pool.position.x, pool.position.y, pool.position.z, pool.rotation.z], [0, 0, 0, 0],
+      'the lintel object stays at identity while its instances follow the field edge');
+    assert.equal(glow.rotation.z, mode === 'left' ? -Math.PI / 2 : 0, 'the glow follows the field orientation independently');
+    if (pool.count) {
+      const [x, y, , angle, , sy] = pool.matrices[0];
+      assert.equal(angle, mode === 'left' ? -Math.PI / 2 : 0);
+      if (mode === 'left') near(x - sy * CEILING_ART.BAR / 2, 570 - FIELD.W / 2, 1e-9, 'vertical rail still meets the collision edge');
+      else near(y - sy * CEILING_ART.BAR / 2, FIELD.H / 2 - 450, 1e-9, 'horizontal rail still meets the collision edge');
+    }
     const [left, right, top, bottom] = walls;
+    assert.equal(left.position.x, right.position.x); assert.equal(top.position.y, bottom.position.y);
     if (mode === 'bottom') {
       assert.equal(left.scale.y * (FIELD.H + 24), FIELD.H - 450 + 24);
       assert.equal(left.position.y, FIELD.H / 2 - (450 + FIELD.H) / 2);

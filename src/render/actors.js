@@ -218,9 +218,13 @@ export function createActors(scene, M) {
   padTitanium.roughness = 0.38;
   padTitanium.emissive = new THREE.Color(LOOK.PADDLE_SELF_LIGHT);
   padTitanium.emissiveIntensity = 1;
+  // Bottom vertices stay below field y=0 even at Forge Wide + maximum lean. Keep the
+  // inherited plane on the legacy left/ring materials, where endpoint lean can need it.
+  const bottomTitanium = padTitanium.clone();
+  bottomTitanium.clippingPlanes = null;
 
   // bar (bottom and left modes)
-  const blade = new THREE.Mesh(bladeGeo, padTitanium);
+  const blade = new THREE.Mesh(bladeGeo, bottomTitanium);
   blade.name = 'paddle-blade';
   const topGlass = new THREE.Mesh(new RoundedBoxGeometry(PADDLE.W - 1, 6, LOOK.PADDLE_DEPTH + 0.8, 2, 2.5), M.paddleGlass);
   topGlass.position.y = H2 - 2.6;
@@ -294,7 +298,7 @@ export function createActors(scene, M) {
     hardware.name = `laser-hardware-${k}`;
     const housing = new THREE.Mesh(housingGeo, laserHousingMat);
     housing.position.set(0, -LASER_MOUNT.LENGTH / 2, 8);
-    const collar = new THREE.Mesh(collarGeo, padTitanium);
+    const collar = new THREE.Mesh(collarGeo, bottomTitanium);
     collar.position.set(0, -LASER_MOUNT.LENGTH + 3, 8);
     const tip = new THREE.Mesh(tipGeo, laserTipMat);
     tip.name = `laser-ready-tip-${k}`;
@@ -307,7 +311,7 @@ export function createActors(scene, M) {
     flash.visible = false;
     mount.add(hardware, flash);
     laserRig.add(mount);
-    laserMounts.push({ mount, hardware, tip, flash });
+    laserMounts.push({ mount, hardware, collar, tip, flash });
   }
   const mountPose = { x: 0, y: 0, nx: 0, ny: 0, rotation: 0 };
 
@@ -397,6 +401,7 @@ export function createActors(scene, M) {
   root.add(dropShell, dropCore, dropMega, dropGlyphs);
 
   let mode = 'bottom';
+  let paddleMaterialsDisposed = false;
   const lerp = (a, b, k) => a + (b - a) * k;
 
   /** Position and turn a paddle group on the track for a track coordinate (x, y or angle). */
@@ -599,6 +604,9 @@ export function createActors(scene, M) {
 
     setWorld(world) {
       mode = world.level.mode;
+      const titanium = mode === 'bottom' ? bottomTitanium : padTitanium;
+      blade.material = titanium;
+      for (const m of laserMounts) m.collar.material = titanium;
       ballStreaks.reset();
       balls.count = 0;
       halos.count = 0;
@@ -635,11 +643,29 @@ export function createActors(scene, M) {
       if (dropMatte.normalMap) gl.initTexture(dropMatte.normalMap);
     },
 
-    /** Pinned Three compiles empty pools before lazily reflecting their first drawn program. */
+    /** Expose both plain variants only during synchronous preparation, never across an await. */
+    withWarmPaddleMaterials(operation, legacyBlade = false) {
+      const previousBlade = blade.material;
+      const previous0 = laserMounts[0].collar.material;
+      const previous1 = laserMounts[1].collar.material;
+      blade.material = legacyBlade ? padTitanium : bottomTitanium;
+      laserMounts[0].collar.material = legacyBlade ? bottomTitanium : padTitanium;
+      laserMounts[1].collar.material = blade.material;
+      try {
+        return operation();
+      } finally {
+        blade.material = previousBlade;
+        laserMounts[0].collar.material = previous0;
+        laserMounts[1].collar.material = previous1;
+      }
+    },
+
+    /** Reflect actual compiled maps again after quality, kit or native-context changes. */
     warmPrograms(gl) {
       const warmed = new Set();
-      for (const mesh of [...dropMeshes, phoneDropBack]) {
-        const programs = gl.properties.get(mesh.material).programs;
+      for (const material of [padTitanium, bottomTitanium, arcTitanium,
+        ...dropMeshes.map(mesh => mesh.material), phoneDropBack.material]) {
+        const programs = gl.properties.get(material).programs;
         if (!programs) continue;
         for (const program of programs.values()) {
           if (warmed.has(program)) continue;
@@ -649,6 +675,15 @@ export function createActors(scene, M) {
         }
       }
       ballStreaks.warmPrograms(gl);
+    },
+
+    /** Inactive variants are absent from scene traversal but still own program references. */
+    dispose() {
+      if (paddleMaterialsDisposed) return;
+      paddleMaterialsDisposed = true;
+      bottomTitanium.dispose();
+      padTitanium.dispose();
+      arcTitanium.dispose();
     },
 
     frame(world, alpha, t, fire, dt) {

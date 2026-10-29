@@ -42,7 +42,16 @@ export class Mesh extends Group {
 export class PlaneGeometry {
   constructor(...args) { this.args = args; this.attributes = {}; }
   setAttribute(name, value) { this.attributes[name] = value; }
-  clone() { return new this.constructor(...this.args); }
+  translate(x, y, z) {
+    const old = this.translation || [0, 0, 0];
+    this.translation = [old[0] + x, old[1] + y, old[2] + z];
+    return this;
+  }
+  clone() {
+    const copy = new this.constructor(...this.args);
+    if (this.translation) copy.translation = [...this.translation];
+    return copy;
+  }
 }
 export class BoxGeometry extends PlaneGeometry {}
 export class RoundedBoxGeometry extends BoxGeometry {}

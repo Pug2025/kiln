@@ -81,12 +81,13 @@ export function createFire(scene) {
   const backM = fireMaterial({ soft: 1, octaves: 4, footY: DEEP_FOOT_Y });
   // the mouth sits behind the kiln lip (z -30)
   const mouthB = FOOT_Y - 2;
-  const mouth = new THREE.Mesh(new THREE.PlaneGeometry(FIELD.W, PLANE_TOP - mouthB), main);
-  mouth.position.set(0, (PLANE_TOP + mouthB) / 2, -30);
+  // Both depths share a program and an identity object matrix; world-space fire/UVs stay put.
+  const mouth = new THREE.Mesh(new THREE.PlaneGeometry(FIELD.W, PLANE_TOP - mouthB)
+    .translate(0, (PLANE_TOP + mouthB) / 2, -30), main);
   mouth.renderOrder = 2;
   const deepB = DEEP_FOOT_Y - 2;
-  const deep = new THREE.Mesh(new THREE.PlaneGeometry(FIELD.W + 200, PLANE_TOP - deepB), backM);
-  deep.position.set(0, (PLANE_TOP + deepB) / 2, -230);
+  const deep = new THREE.Mesh(new THREE.PlaneGeometry(FIELD.W + 200, PLANE_TOP - deepB)
+    .translate(0, (PLANE_TOP + deepB) / 2, -230), backM);
   deep.renderOrder = 1;
   scene.add(mouth, deep);
   const mats = [main, backM];

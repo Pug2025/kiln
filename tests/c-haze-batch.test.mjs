@@ -45,6 +45,7 @@ test('haze batches preserve all four layers, straight alpha and shared live pale
   assert.deepEqual(kiln.haze.flatMap(layers).map(x => x.index), [3, 2, 1, 0], 'far pair primitives stay back to front');
   const material = kiln.haze[0].material;
   for (const mesh of kiln.haze) {
+    assert.deepEqual(mesh.position.toArray(), [0, 0, 0], 'world layer offsets live in the existing instances');
     assert.ok(mesh.isInstancedMesh);
     assert.equal(mesh.renderOrder, -3);
     assert.equal(mesh.material, material, 'one instanced program and uniform set');

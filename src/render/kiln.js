@@ -184,7 +184,8 @@ export function createKiln(scene, M) {
     const attr = mesh.geometry.attributes.aHaze;
     for (let i = 0; i < indices.length; i++) {
       const index = indices[i], [z, alpha, seed, tint] = hazeLayers[index];
-      m4.makeTranslation(0, 0, z - mesh.position.z);
+      // All batches share one object matrix; layer placement belongs to the instance.
+      m4.makeTranslation(0, -120, z);
       mesh.setMatrixAt(i, m4);
       const offset = i * 4;
       attr.array[offset] = seed; attr.array[offset + 1] = alpha;
@@ -195,21 +196,20 @@ export function createKiln(scene, M) {
     attr.needsUpdate = true;
     mesh.computeBoundingSphere();
   }
-  function hazeBatch(name, z, indices) {
+  function hazeBatch(name, indices) {
     const geo = new THREE.PlaneGeometry(1900, 1500);
     geo.setAttribute('aHaze', new THREE.InstancedBufferAttribute(new Float32Array(indices.length * 4), 4));
     const mesh = new THREE.InstancedMesh(geo, hazeMat, indices.length);
     mesh.name = name;
-    mesh.position.set(0, -120, z);
     mesh.renderOrder = -3;
     writeHaze(mesh, indices);
     scene.add(mesh);
     return mesh;
   }
   const fullFar = [3, 2], oneFar = [2];
-  const farHaze = hazeBatch('kiln-haze-far', -480, fullFar);
-  const middleHaze = hazeBatch('kiln-haze-middle', -260, [1]);
-  const nearHaze = hazeBatch('kiln-haze-near', -90, [0]);
+  const farHaze = hazeBatch('kiln-haze-far', fullFar);
+  const middleHaze = hazeBatch('kiln-haze-middle', [1]);
+  const nearHaze = hazeBatch('kiln-haze-near', [0]);
   const haze = [farHaze, middleHaze, nearHaze];
   let oneHaze = false;
 
@@ -255,16 +255,28 @@ export function createKiln(scene, M) {
   const lipLong = new RoundedBoxGeometry(FW + 24, 10, 70, 3, 3);
   const lipTall = new RoundedBoxGeometry(10, FH + 24, 70, 3, 3);
   const wallL = new THREE.Mesh(sideGeo, M.wallGlass);
-  const wallR = new THREE.Mesh(sideGeo, M.wallGlass);
+  const wallR = new THREE.Mesh(sideGeo.clone(), M.wallGlass);
   const wallT = new THREE.Mesh(endGeo, M.wallGlass);
-  const wallB = new THREE.Mesh(endGeo, M.wallGlass);
+  const wallB = new THREE.Mesh(endGeo.clone(), M.wallGlass);
   wallL.name = 'kiln-wall-left'; wallR.name = 'kiln-wall-right';
   wallT.name = 'kiln-wall-top'; wallB.name = 'kiln-wall-bottom';
-  wallL.position.set(-(FW / 2 + 6), 0, -6);
-  wallR.position.set(FW / 2 + 6, 0, -6);
-  wallT.position.set(0, FH / 2 + 6, -6);
-  wallB.position.set(0, -(FH / 2 + 6), -6);
-  for (const w of [wallL, wallR, wallT, wallB]) w.renderOrder = 6;
+  // Fixed offsets lie on the axis setMode never scales. Keep each wall's normals/UVs and
+  // perpendicular mode scale intact, while opposite walls share the same object matrix.
+  const offsetWall = (wall, x, y) => {
+    const geo = wall.geometry, normal = geo.attributes.normal;
+    // translate() also normalizes normals; a position offset must retain the rounded normals.
+    if (normal) geo.deleteAttribute('normal');
+    geo.translate(x, y, 0);
+    if (normal) geo.setAttribute('normal', normal);
+  };
+  offsetWall(wallL, -(FW / 2 + 6), 0);
+  offsetWall(wallR, FW / 2 + 6, 0);
+  offsetWall(wallT, 0, FH / 2 + 6);
+  offsetWall(wallB, 0, -(FH / 2 + 6));
+  for (const w of [wallL, wallR, wallT, wallB]) {
+    w.position.z = -6;
+    w.renderOrder = 6;
+  }
   const lipB = new THREE.Mesh(lipLong, M.titaniumP);
   lipB.position.set(0, -FH / 2 - 5, 6);
   const lipL = new THREE.Mesh(lipTall, M.titaniumP);
@@ -329,6 +341,7 @@ export function createKiln(scene, M) {
   ceilingBar.visible = ceilingGlow.visible = false;
   frame.add(ceilingBar, ceilingGlow);
   const lintelPart = {}, contact = {};
+  const lintelTransform = new THREE.Matrix4();
   let contactT = -1e9, contactAt = 0;
   function updateContact(age) {
     ceilingContact(ceiling, contactAt, age, contact);
@@ -361,14 +374,16 @@ export function createKiln(scene, M) {
       ceilingBar.visible = ceilingGlow.visible = ceiling.active;
       contactT = -1e9;
       updateContact(1);
-      ceilingBar.position.set(ceiling.barX - FW / 2, HH_ - ceiling.barY, 0);
-      ceilingBar.rotation.z = ceiling.vertical ? -Math.PI / 2 : 0;
+      const lintelRotation = ceiling.vertical ? -Math.PI / 2 : 0;
+      lintelTransform.makeRotationZ(lintelRotation);
+      lintelTransform.setPosition(ceiling.barX - FW / 2, HH_ - ceiling.barY, 0);
       // The renderer enables every nonempty instance pool before drawing, so inactive means zero.
       ceilingBar.count = ceiling.active ? 1 + ceiling.segments : 0;
       for (let i = 0; i < ceilingBar.count; i++) {
         lintelPiece(ceiling, i, lintelPart);
         m4.makeScale(lintelPart.w / CEILING_ART.SEGMENT, lintelPart.h / CEILING_ART.BAR, lintelPart.d / CEILING_ART.DEPTH);
         m4.setPosition(lintelPart.x, lintelPart.y, 0);
+        m4.premultiply(lintelTransform);
         ceilingBar.setMatrixAt(i, m4);
       }
       ceilingBar.instanceMatrix.needsUpdate = true;
@@ -376,7 +391,7 @@ export function createKiln(scene, M) {
       const offset = (CEILING_ART.SHADE - 1) / 2;
       ceilingGlow.position.x = (ceiling.vertical ? ceiling.edge + offset : FW / 2) - FW / 2;
       ceilingGlow.position.y = HH_ - (ceiling.vertical ? FH / 2 : ceiling.edge - offset);
-      ceilingGlow.rotation.z = ceilingBar.rotation.z;
+      ceilingGlow.rotation.z = lintelRotation;
       ceilingGlow.scale.set(ceiling.barLength, CEILING_ART.SHADE + 1, 1);
       lintelMat.uniforms.uLength.value = ceiling.barLength;
       wallL.scale.y = wallR.scale.y = ceiling.wallH / (FH + 24);

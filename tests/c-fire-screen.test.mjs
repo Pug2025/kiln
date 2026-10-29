@@ -13,6 +13,25 @@ register(`data:text/javascript,${encodeURIComponent(`export async function resol
 const { createFire } = await import('../src/render/fire.js');
 const { FIRE_FRAG } = await import('../src/render/shaders.js');
 
+test('fire planes retain their world band, UVs and normals with constant identity object transforms', () => {
+  const scene = new THREE.Scene(), fire = createFire(scene);
+  for (const [mesh, halfWidth, bottom, z] of [[fire.mouth, FIELD.W / 2, -612, -30],
+    [fire.deep, (FIELD.W + 200) / 2, -702, -230]]) {
+    mesh.updateMatrixWorld(true);
+    assert.ok(mesh.matrixWorld.equals(new THREE.Matrix4()));
+    const p = mesh.geometry.attributes.position, n = mesh.geometry.attributes.normal;
+    const uv = mesh.geometry.attributes.uv, oldPlane = new THREE.PlaneGeometry(halfWidth * 2, -330 - bottom);
+    assert.deepEqual([...uv.array], [...oldPlane.attributes.uv.array], 'same fire sampling coordinates');
+    assert.deepEqual([...n.array], [...oldPlane.attributes.normal.array], 'translation leaves normals intact');
+    const xs = [], ys = [];
+    for (let i = 0; i < p.count; i++) { xs.push(p.getX(i)); ys.push(p.getY(i)); assert.equal(p.getZ(i), z); }
+    assert.deepEqual([Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)], [-halfWidth, halfWidth, bottom, -330]);
+    const values = [...p.array], version = p.version;
+    for (let frame = 0; frame < 120; frame++) fire.update(frame / 60, 1 / 60);
+    assert.equal(p.version, version); assert.deepEqual([...p.array], values, 'fire animation does not rewrite static positions');
+  }
+});
+
 // Exercise the actual renderer helper without creating a browser or a fake WebGL renderer.
 // Its real camera, projection and hull helper run; only post's setter/draw boundary is observed.
 const renderer = readFileSync(new URL('../src/render/renderer.js', import.meta.url), 'utf8');
