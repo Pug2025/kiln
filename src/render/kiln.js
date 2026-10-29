@@ -42,9 +42,21 @@ export function makeEnvironment(gl) {
   for (let i = -3; i <= 3; i++) add(new THREE.PlaneGeometry(0.25, 10), new THREE.Color(0x272b31), i * 1.3, 0, -4.9);
   add(new THREE.PlaneGeometry(9, 4.5), new THREE.Color(0x3d4654).multiplyScalar(0.85), 0, -0.6, 4.9, 0, Math.PI);
   add(new THREE.PlaneGeometry(9, 0.6), new THREE.Color(0x9fb0c4).multiplyScalar(1.6), 0, 1.8, 4.9, 0, Math.PI);
-  const env = pm.fromScene(s, 0.04).texture;
-  pm.dispose();
-  for (const o of owned) o.dispose();
+  let target;
+  try {
+    target = pm.fromScene(s, 0.04);
+  } finally {
+    pm.dispose();
+    for (const o of owned) o.dispose();
+  }
+  // The caller owns the PMREM output, including its framebuffer and depth attachment. Keep
+  // the texture API used by both scenes, but release the full target when that texture retires.
+  const env = target.texture;
+  const release = () => {
+    env.removeEventListener('dispose', release);
+    target.dispose();
+  };
+  env.addEventListener('dispose', release);
   return env;
 }
 

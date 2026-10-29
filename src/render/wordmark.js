@@ -264,11 +264,13 @@ function sharedTitleWall() {
     e.preventDefault();
     titleWall.lost = true;
     if (titleWall.owner) titleWall.owner.suspend();
+    // Release the full PMREM target while lost, before the new context rejects its old handles.
+    scene.environment?.dispose();
+    scene.environment = null;
   });
   canvas.addEventListener('webglcontextrestored', () => {
     titleWall.lost = false;
     // PMREM's GPU target is not recreated by three.js after a context restore.
-    scene.environment.dispose();
     scene.environment = makeEnvironment(gl);
     if (titleWall.owner) titleWall.owner.resize();
   });

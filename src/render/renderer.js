@@ -135,11 +135,17 @@ export async function createRenderer(host, opts = {}) {
     onLost() {
       contextEpoch++;
       bootJob?.cancel('context-lost');
+      // Retire while the context is lost; deleting these old GPU handles after restore is invalid.
+      scene.environment?.dispose();
+      scene.environment = null;
     },
     onRestored() {
       if (disposed) return;
       gpuTimer.rebuild();
       resize();
+      // PMREM's rendered contents do not survive a context loss. Rebuild before any restored
+      // materials are prepared or drawn, using the same procedural kiln and resting palette.
+      scene.environment = makeEnvironment(gl);
       boss.refreshMaps();
       warmUp();
     },
@@ -789,6 +795,8 @@ export async function createRenderer(host, opts = {}) {
       disposed = true;
       bootJob?.cancel('disposed');
       glWatch.dispose();
+      scene.environment?.dispose();
+      scene.environment = null;
       post.dispose();
       gl.dispose();
       canvas.remove();

@@ -1,7 +1,7 @@
 // C: a stand-in for the parts of three.js that src/render/wordmark.js touches, so Node can check
 // how many WebGL renderers (browser WebGL slots) the title flame uses. Counts live in STUB.
 
-export const STUB = { renderers: 0, renders: 0, disposed: 0, contextsLost: 0, instances: [], renderLog: [], textures: [] };
+export const STUB = { renderers: 0, renders: 0, disposed: 0, contextsLost: 0, instances: [], renderLog: [], textures: [], pmrem: [] };
 
 export const SRGBColorSpace = 'srgb';
 export const NoColorSpace = '';
@@ -92,7 +92,25 @@ export class InstancedMesh extends Mesh {
 export class HemisphereLight extends Object3D {}
 export class DirectionalLight extends Object3D {}
 export class PointLight extends Object3D {}
-export class PMREMGenerator { fromScene() { return { texture: { dispose() {} } }; } dispose() {} }
+export class PMREMGenerator {
+  constructor(gl) { this.gl = gl; this.disposals = 0; STUB.pmrem.push(this); }
+  fromScene(scene, sigma) {
+    this.scene = scene; this.sigma = sigma;
+    if (STUB.failPmrem) throw new Error('PMREM unavailable');
+    const listeners = new Set();
+    this.target = {
+      disposals: 0,
+      dispose() { this.disposals++; },
+      texture: {
+        addEventListener(type, fn) { if (type === 'dispose') listeners.add(fn); },
+        removeEventListener(type, fn) { if (type === 'dispose') listeners.delete(fn); },
+        dispose() { for (const fn of [...listeners]) fn({ target: this }); },
+      },
+    };
+    return this.target;
+  }
+  dispose() { this.disposals++; }
+}
 
 // ---- a minimal DOM: elements with parents, styles and sizes ----
 
