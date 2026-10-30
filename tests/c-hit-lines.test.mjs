@@ -15,6 +15,7 @@ register(`data:text/javascript,${encodeURIComponent(`export async function resol
   return next(spec, ctx);
 }`)}`);
 const THREE = await import(STUB_URL);
+const { MeshStandardMaterial } = await import('../vendor/three/0.160.0/build/three.module.js');
 THREE.installCanvas();
 const { createMarks } = await import('../src/render/marks.js');
 const { createBricks } = await import('../src/render/bricks.js');
@@ -163,7 +164,7 @@ test('wall renderer automatically replaces dense HP5 fallback with four hit line
   const t = contentWorld(level(['5...........'])), w = t.world, B = w.bricks;
   B.w[0] = 30; B.h[0] = 30;
   const scene = new THREE.Group(), white = new THREE.MeshBasicMaterial({ color: 0xffffff });
-  const materials = { tex: { glow: {} }, shell: white, cavityGlass: white, titanium: white, matte: white,
+  const materials = { tex: { glow: {} }, shell: white, cavityGlass: white, titanium: new MeshStandardMaterial(), matte: white,
     core: white, white, white70: white, white50: white, darkMetal: white };
   const bricks = createBricks(scene, materials);
   bricks.setReadability({ small: true, scale: 0.2901833621 }); bricks.setWorld(w); bricks.frame(1, 0, () => {});
@@ -246,7 +247,7 @@ test('loaded glass and armour retain the marked good drop while renderer lines f
 
 function wallFor(t) {
   const scene = new THREE.Group(), white = new THREE.MeshBasicMaterial({ color: 0xffffff });
-  const materials = { tex: { glow: {} }, shell: white, cavityGlass: white, titanium: white, matte: white,
+  const materials = { tex: { glow: {} }, shell: white, cavityGlass: white, titanium: new MeshStandardMaterial(), matte: white,
     core: white, white, white70: white, white50: white, darkMetal: white };
   const wall = createBricks(scene, materials), ended = [];
   const draw = time => wall.frame(1, time, rupture => ended.push({ ...rupture }));

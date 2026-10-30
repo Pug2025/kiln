@@ -22,6 +22,8 @@ import { LOOK } from './look.js';
 import { createMarks } from './marks.js';
 import { createCoreDamage, BLOCK_FLASH_S } from './core-damage.js';
 import { isBossCore, coreProtected, blockDullsCore, CORE_COOL_HEAT } from './boss-feedback.js';
+import { PAL } from './materials.js';
+import { STOKER_TITANIUM } from './boss.js';
 
 const HW = FIELD.W / 2;
 const HH = FIELD.H / 2;
@@ -57,6 +59,10 @@ export function createBricks(scene, M) {
   root.name = 'bricks';
   scene.add(root);
 
+  // The six Stoker jaw plates share the brow's finish without changing shared armour.
+  // Keep one retained material on the existing pools so boot prepares its instanced program.
+  const titanium = M.titanium.clone();
+
   // ---- shapes (lazily) ----
   const shapes = {};
   function shape(name) {
@@ -69,7 +75,7 @@ export function createBricks(scene, M) {
     const groups = [];
     for (let g = 0; g < 4; g++) {
       const hasCore = g === G_GLASS || g === G_CLEAR;
-      const shellMat = g === G_GLASS ? M.shell : g === G_CLEAR ? M.cavityGlass : g === G_TI ? M.titanium : M.matte;
+      const shellMat = g === G_GLASS ? M.shell : g === G_CLEAR ? M.cavityGlass : g === G_TI ? titanium : M.matte;
       const shell = new THREE.InstancedMesh(shellGeo, shellMat, CAP);
       shell.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       shell.count = 0;
@@ -161,6 +167,7 @@ export function createBricks(scene, M) {
   // (core, matte, dark metal, white marks) also serve pickups and pieces, which never go up there.
   // The renderer turns on local clipping (gl.localClippingEnabled).
   const topClip = [new THREE.Plane(new THREE.Vector3(0, -1, 0), HH)];
+  M.titanium.clippingPlanes = topClip; // later paddle clones inherit the original ceiling plane
   root.traverse((o) => {
     if (!o.isInstancedMesh) return;
     o.material.clippingPlanes = topClip;
@@ -223,7 +230,7 @@ export function createBricks(scene, M) {
       slotOf[i] = -1;
       grpOf[i] = -1;
       if (!B.alive[i] || (B.flags[i] & BF.HIDDEN)) continue;
-      // The first boss's permanent head is dark, while its breakable chin stays titanium.
+      // The first boss's permanent head is dark, while its breakable chin uses warm titanium.
       const g = world.boss?.id === 'stoker' && B.type[i] === BRICK.BOSS ? G_MATTE : groupOf(B.type[i], B.flags[i]);
       const gr = cur.groups[g];
       const slot = gr.live++;
@@ -322,6 +329,14 @@ export function createBricks(scene, M) {
     setWorld(w) {
       world = w;
       mode = w.level.mode;
+      titanium.color.copy(M.titanium.color);
+      titanium.emissive.copy(M.titanium.emissive);
+      titanium.envMapIntensity = M.titanium.envMapIntensity;
+      if (w.boss?.id === 'stoker') {
+        titanium.color.setHex(STOKER_TITANIUM.color);
+        titanium.envMapIntensity = STOKER_TITANIUM.envMapIntensity;
+        titanium.emissive.copy(PAL.heatLoRest).multiplyScalar(STOKER_TITANIUM.heat);
+      }
       const clip = topClip[0];
       if (mode === 'left') {
         clip.normal.set(-1, 0, 0);

@@ -154,6 +154,7 @@ export async function launchChrome(opts = {}) {
   ];
   const bin = opts.chrome || findChrome();
   const proc = spawn(bin, args, { stdio: ['ignore', 'ignore', 'pipe'] });
+  const settleUntil = performance.now() + 8000;
   let spawnError = null;
   proc.on('error', (err) => { spawnError = err; });
   const release = guardChild(proc, { cleanup: dropProfile ? profile : '' });
@@ -181,6 +182,9 @@ export async function launchChrome(opts = {}) {
   let version;
   let conn;
   try {
+    // Fresh QA Chrome can report ERR_CERT_VERIFIER_CHANGED on immediate navigation.
+    // Settle once per launch before exposing any navigation path, including raw conn.
+    while (performance.now() < settleUntil) await sleep(settleUntil - performance.now());
     version = await (await fetch(`http://127.0.0.1:${port}/json/version`)).json();
     conn = await connect(version.webSocketDebuggerUrl);
   } catch (err) {

@@ -44,10 +44,12 @@ test('haze batches preserve all four layers, straight alpha and shared live pale
   assert.equal(kiln.haze.length, 3);
   assert.deepEqual(kiln.haze.flatMap(layers).map(x => x.index), [3, 2, 1, 0], 'far pair primitives stay back to front');
   const material = kiln.haze[0].material;
+  assert.equal(material.uniforms.uDensity.value, LOOK.HAZE_DENSITY);
+  assert.equal(LOOK.HAZE_DENSITY, .5, 'post-plate haze compensates for the removed smoked attenuation');
   for (const mesh of kiln.haze) {
     assert.deepEqual(mesh.position.toArray(), [0, 0, 0], 'world layer offsets live in the existing instances');
     assert.ok(mesh.isInstancedMesh);
-    assert.equal(mesh.renderOrder, -3);
+    assert.equal(mesh.renderOrder, 0);
     assert.equal(mesh.material, material, 'one instanced program and uniform set');
     assert.equal(mesh.material.depthWrite, false);
     assert.equal(mesh.material.transparent, true);
@@ -77,6 +79,7 @@ test('haze clocks retain original CPU float32 offsets through long sessions with
     assert.equal(material.uniforms.uTimes.value, times);
     assert.equal(material.uniforms.uParams.value, params);
     assert.deepEqual([...params], initialParams);
+    assert.equal(material.uniforms.uDensity.value, .5, 'fire/combo cannot raise the fixed haze density');
     assert.deepEqual([...times], original.map((_, i) => Math.fround(t + i * 7)));
     near(material.uniforms.uWarm.value, .35 + .45 * fire);
     kiln.haze.forEach((mesh, i) => {
@@ -123,39 +126,45 @@ test('haze aggregate bounds contain every transformed corner after each quality 
   }
 });
 
-test('far haze pair preserves the old transparent sequence across fitted modes and bounded camera motion', () => {
+test('ordered haze composites after the smoked plate and before foreground across fits and quality modes', () => {
   const { kiln, scene } = fixture(), headroom = createHeadroom(scene);
+  const shaft = scene.children.find(object => object.material === kiln.shaftMat);
   const sizes = [[320, 568], [390, 844], [375, 667], [412, 915], [768, 1024], [800, 557],
     [1024, 768], [1280, 800], [1440, 900], [2560, 1080]];
   const frames = [ceilingLayout('ring'),
     ...[90, 300, 450, 600, 780].map(ceilingY => ceilingLayout('bottom', { ceilingY })),
     ...[90, 270, 450, 570, 720].map(farX => ceilingLayout('left', { farX }))];
-  let minimum = Infinity, unsafeTriple = false;
-  // Camera direction is affine in lean/drift and intro/zoom. Extremal box corners bound all
-  // intermediate motion. Shake, focus dolly translation and roll do not alter relative depth.
+  const qualityCases = [[false, false, [3, 2, 1, 0]], [true, false, [2]], [false, true, [2]]].map(([lite, hazeOne, indices]) => {
+    kiln.setLite(lite, hazeOne);
+    return { indices, batches: kiln.haze.filter(mesh => mesh.count > 0).map((mesh, i) => ({
+      id: `batch${i}`, renderOrder: mesh.renderOrder,
+      position: mesh.boundingSphere.center.clone().add(mesh.position),
+      indices: layers(mesh).map(layer => layer.index),
+    })) };
+  });
   for (const [W, H] of sizes) for (const frame of frames) {
     for (const [top, bottom] of [[0, 0], [100, 70], [150, 70], [H * .4, H * .1]]) {
       const pose = createPose(), fit = fitCamera(W, H, pose, {}, { frame, top, bottom });
       headroom.layout(pose, W, H, frame);
-      const art = [headroom.far, headroom.mid].map((mesh, i) => ({ id: `art${i}`, position: mesh.position }));
       for (const lean of [-340 * LOOK.LEAN, 340 * LOOK.LEAN]) for (const dx of [-16, 16]) {
         for (const dy of [-8, 8]) for (const ratio of [1 / 1.3, LOOK.INTRO_DOLLY]) {
           const direction = new THREE.Vector3(lean * (LOOK.LEAN_LOOK - LOOK.LEAN_POS) - dx * .7,
             fit.look - 150 - dy * .7, -fit.dist * ratio).normalize();
           const depth = position => position.dot(direction);
-          const old = original.map((layer, i) => ({ id: `haze${i}`, position: new THREE.Vector3(0, -120, layer.z) }));
-          const pair = kiln.haze[0];
-          const batch = { id: 'pair', position: pair.boundingSphere.center.clone().add(pair.position) };
-          const before = [...art, ...old].sort((a, b) => depth(b.position) - depth(a.position)).map(x => x.id);
-          const after = [...art, old[0], old[1], batch].sort((a, b) => depth(b.position) - depth(a.position))
-            .flatMap(x => x.id === 'pair' ? ['haze3', 'haze2'] : [x.id]);
-          assert.deepEqual(after, before);
-          for (const plate of art) minimum = Math.min(minimum, depth(old[2].position) - depth(plate.position));
-          if (depth(old[1].position) < depth(art[0].position)) unsafeTriple = true;
+          const order = (a, b) => a.renderOrder - b.renderOrder || depth(b.position) - depth(a.position);
+          const entry = (id, mesh) => ({ id, renderOrder: mesh.renderOrder, position: mesh.position });
+          const art = [headroom.far, headroom.mid].map((mesh, i) => entry(`art${i}`, mesh));
+          const fixed = [...art, entry('shaft', shaft), entry('plate', kiln.plate)];
+          // A transparent mark at the field plane shares order0 but must remain in front of haze.
+          const foreground = { id: 'foreground', renderOrder: 0, position: new THREE.Vector3(0, 0, 0) };
+          for (const { indices, batches } of qualityCases) {
+            const actual = [...fixed, ...batches, foreground].sort(order).flatMap(x => x.indices ? x.indices.map(i => `haze${i}`) : [x.id]);
+            const expected = [...art].sort(order).map(x => x.id).concat('shaft', 'plate', indices.map(i => `haze${i}`), 'foreground');
+            assert.deepEqual(actual, expected, `${W}x${H} haze must not move behind its smoked plate`);
+            assert.deepEqual(batches.flatMap(x => x.indices), indices, 'far pair primitive order remains back to front');
+          }
         }
       }
     }
   }
-  assert.ok(minimum > 80, `nearest batched layer stays behind art, minimum gap ${minimum}`);
-  assert.ok(unsafeTriple, 'three-layer batching would change existing art interleaving in this envelope');
 });

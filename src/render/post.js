@@ -105,6 +105,15 @@ export function createPost(gl, scene, camera) {
     clearBallMasks() { guards.uBallMaskCount.value = 0; guards.uBallMasks.value.fill(0); },
     setSaturation(saturation) { output.uniforms.uSat.value = saturation; },
 
+    contextLost() {
+      if (disposed) return;
+      // Retire r160's old-context disposal listeners before its properties map is replaced.
+      // Keep the JS targets and texture references: their next bind recreates GPU storage.
+      composer.renderTarget1.dispose(); composer.renderTarget2.dispose();
+      for (const target of Object.values(bloom.targets)) target.dispose();
+      warmTarget.dispose(); blank.dispose();
+    },
+
     // Four offscreen draws prepare both bloom programs, owned targets and the real output
     // variant even when booting Lite. No scene/gameplay draw, time advance or readiness signal.
     warmUp() {

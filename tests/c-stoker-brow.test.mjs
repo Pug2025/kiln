@@ -5,6 +5,9 @@
 // the shared titanium (arena lip, Crucible ring, Core shields) is untouched.
 import { register } from 'node:module';
 import { test, assert } from './lib.mjs';
+import { BRICK } from '../src/core/constants.js';
+import { getLevel, stagesOf } from '../src/levels/index.js';
+import { contentWorld } from './fixtures/B/helpers.mjs';
 
 const threeURL = new URL('../vendor/three/0.160.0/build/three.module.js', import.meta.url).href;
 const addonURL = new URL('../vendor/three/0.160.0/examples/jsm/', import.meta.url).href;
@@ -14,8 +17,9 @@ register(`data:text/javascript,${encodeURIComponent(`export async function resol
   return next(spec, ctx);
 }`)}`);
 const THREE = await import(threeURL);
-const { PAL } = await import('../src/render/materials.js');
+const { PAL, coreMaterial } = await import('../src/render/materials.js');
 const { createBoss, STOKER_TITANIUM } = await import('../src/render/boss.js');
+const { createBricks } = await import('../src/render/bricks.js');
 
 const SHARED = { color: 0xc0c4ca, roughness: 0.38, metalness: 0.9, envMapIntensity: 2.4 };
 
@@ -112,5 +116,52 @@ test('the shared titanium and the other bosses keep their titanium', () => {
   // the Crucible and Core placeholders too
   for (const g of root.children.slice(1, 3)) {
     g.traverse((o) => { if (o.isMesh && o.material.metalness > 0.5) assert.equal(o.material.color.getHex(), SHARED.color); });
+  }
+});
+
+test('only the Stoker live jaw plates use the warm finish; core and later armour stay unchanged', async () => {
+  const { installCanvas } = await import('./fixtures/C/marks-three-stub.mjs');
+  installCanvas();
+  const { M } = kit();
+  const white = new THREE.MeshBasicMaterial();
+  Object.assign(M, {
+    titanium: M.titaniumP.clone(), matte: M.matteP, core: coreMaterial(M.tex),
+    shell: white, cavityGlass: white, white, white70: white, white50: white, darkMetal: M.darkMetalP,
+  });
+  const wall = createBricks(new THREE.Scene(), M);
+  const pools = wall.root.children.filter(o => o.isInstancedMesh);
+  const plates = pools.filter(o => o.material.map === M.titanium.map);
+  assert.equal(plates.length, 2, 'one retained titanium pool per existing shape');
+  const finish = plates[0].material;
+  const coreBefore = M.core.toJSON(), sharedBefore = M.titanium.toJSON();
+  const levels = [getLevel(10), getLevel(11), getLevel(20), ...stagesOf(getLevel(30)), getLevel(10)];
+  for (const level of levels) {
+    const w = contentWorld(level).world;
+    const before = structuredClone(w.bricks);
+    wall.setWorld(w);
+    wall.frame(1, 0, () => {});
+    assert.deepEqual(w.bricks, before, `${level.id}: renderer leaves collision and HP unchanged`);
+    assert.deepEqual(wall.root.children.filter(o => o.isInstancedMesh), pools, 'no pool added or replaced');
+    assert.ok(plates.every(o => o.material === finish), 'both shapes retain their prepared material');
+    assert.notEqual(finish, M.titanium, 'shared armour is never recoloured');
+    const stoker = w.boss.id === 'stoker';
+    assert.equal(finish.color.getHex(), stoker ? STOKER_TITANIUM.color : SHARED.color, level.id);
+    assert.equal(finish.envMapIntensity, stoker ? STOKER_TITANIUM.envMapIntensity : SHARED.envMapIntensity, level.id);
+    const heat = stoker ? PAL.heatLoRest.clone().multiplyScalar(STOKER_TITANIUM.heat) : M.titanium.emissive;
+    assert.deepEqual(finish.emissive, heat, level.id);
+    assert.equal(finish.map, M.titanium.map);
+    assert.equal(finish.metalness, SHARED.metalness);
+    assert.equal(finish.roughness, SHARED.roughness);
+    assert.equal(finish.clippingPlanes.length, 1, 'same ceiling clipping');
+    assert.equal(finish.clippingPlanes, M.titanium.clippingPlanes, 'later paddle clones keep the original shared plane');
+    assert.deepEqual(M.core.toJSON(), coreBefore, 'the hot core material is exact');
+    assert.deepEqual(M.titanium.toJSON(), sharedBefore, 'ordinary armour base is exact');
+    if (stoker) {
+      const jaw = [...w.bricks.type.subarray(0, w.bricks.count)].filter(t => t === BRICK.ARMOURED);
+      assert.equal(jaw.length, 6);
+      assert.equal(plates.reduce((n, o) => n + o.count, 0), 6, 'only six live plates use this pool');
+      const cores = pools.filter(o => o.material === M.core && o.count);
+      assert.equal(cores.length, 1, 'the hot core keeps its separate instanced pool');
+    }
   }
 });

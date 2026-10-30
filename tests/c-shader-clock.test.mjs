@@ -123,16 +123,20 @@ test('world identity controls decorative reset, without restarting on ordinary p
   const r = replay(79940), origin = r.env.shaderOrigin, flow = r.fire.st.flow, phase = r.fire.st.phase;
   r.api.resize(); r.api.setMenu(true); r.api.setMenu(false);
   assert.equal(r.env.shaderOrigin, origin); assert.equal(r.fire.st.flow, flow); assert.equal(r.fire.st.phase, phase);
+  const intro = r.fire.st.intro;
   r.api.setWorld(r.w);
   assert.deepEqual(r.last('fire.reset'), [false]);
+  assert.equal(r.fire.st.intro, intro, 'same-world binding cannot replay the rise');
   assert.equal(r.env.shaderOrigin, origin); assert.equal(r.fire.st.flow, flow); assert.equal(r.fire.st.phase, phase);
   const fresh = { ...r.w, bus: createBus() };
   r.api.setWorld(fresh);
   assert.deepEqual(r.last('fire.reset'), [true]);
   assert.equal(r.env.t, 80000); assert.equal(r.env.shaderOrigin, 80000);
   assert.equal(r.fire.st.flow, 0); assert.equal(r.fire.st.phase, 0);
+  assert.equal(r.fire.st.intro, 0, 'an actual new world starts its own fire rise');
   r.api.frame(fresh, .5, 1 / 64);
   assert.deepEqual(r.last('fire.update'), [1 / 64, 1 / 64]);
+  near(r.fire.st.intro, (1 / 64) / LOOK.FIRE_INTRO_S);
 });
 
 test('fire flow stays integrated through multiplier/flare changes and only periodic breath phase wraps', () => {

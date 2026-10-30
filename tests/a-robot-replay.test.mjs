@@ -1,7 +1,7 @@
 // Item 23: the robot's shot search got cheaper, and its play must not change. For every run below
 // two worlds start from the same seed: one is played by the production robot (src/sim/robot.js and
 // aim.js), the other by the frozen copy from main 980f042 (tests/fixtures/A/robot-reference.mjs).
-// They step in lockstep. Every step the two input frames, the chosen shot (offset, paddle velocity,
+// They step in lockstep. During serve/play the two input frames and the chosen shot (offset, paddle velocity,
 // score, the ball and crossing it was planned for) and the plan count must be identical, compared
 // with Object.is, so not even the last bit of a number may differ. The worlds then stay identical
 // too, which the end checks (step, phase, bricks left, score, the robot's random stream).
@@ -9,6 +9,8 @@
 // The runs cover The Core's three stages (bottom, left and ring fields with moving boss parts and
 // the fine search at its last brick), the Crucible, the Stoker, a left and a ring level, a dense
 // late level and the opening, over several seeds, with the default robot and the imprecise one.
+// During clearing both worlds receive the production reward-collection input. This intentionally
+// replaces the old robot's shot searches after the last brick; no planning or RNG advances then.
 import { test, assert } from './lib.mjs';
 import { createWorld, stepWorld } from '../src/core/world.js';
 import { createInputFrame, clearEdges } from '../src/core/input-frame.js';
@@ -17,6 +19,7 @@ import { getLevel, stagesOf } from '../src/levels/index.js';
 import { createRun } from '../src/economy/economy.js';
 import { createRobot } from '../src/sim/robot.js';
 import { createRobot as createReferenceRobot } from './fixtures/A/robot-reference.mjs';
+import { physicsWorld, launchAt } from './fixtures/A/sim.mjs';
 
 const FRAME = ['steer', 'tx', 'ty', 'axis', 'fast', 'action', 'pull', 'overload'];
 const PLAN = ['ball', 's', 'off', 'vel', 'score', 'at'];
@@ -39,7 +42,8 @@ function replay(n, seed, opts = {}, maxStageMs = 150000) {
     for (let s = 0; s < maxSteps && a.phase !== 'cleared' && a.phase !== 'over'; s++) {
       const before = robotA.debug.plans;
       robotA.fill(fa, a);
-      robotB.fill(fb, b);
+      if (a.phase === 'clearing') Object.assign(fb, fa);
+      else robotB.fill(fb, b);
       for (const k of FRAME) {
         if (!Object.is(fa[k], fb[k])) {
           assert.fail(`level ${n} ${def.id} seed ${seed} step ${a.step}: input ${k} ${fa[k]} vs reference ${fb[k]}`);
@@ -97,3 +101,29 @@ test('the imprecise robot (no perfect hits, no pickups) also chooses the same sh
   const r = replay(30, 4, { perfect: false, pickups: false }, 120000);
   assert.ok(r.plans > 100, `${r.plans} plans compared`);
 }, { timeout: 120000 });
+
+test('after the final brick the robot collects rewards without planning shots or spending RNG', () => {
+  const { world, frame } = physicsWorld();
+  launchAt(world, 360, 900, 0, 600);
+  world.phase = 'clearing'; world.level.remaining = 0;
+  const E = world.embers;
+  E.count = 1; E.alive[0] = 1;
+  E.x[0] = 440; E.y[0] = 850; E.vx[0] = 0; E.vy[0] = 400;
+  const robot = createRobot(), random = world.rng.robot.state;
+  const before = { ...robot.debug.plan }, step = world.step;
+  frame.action = frame.overload = frame.pull = true;
+  robot.fill(frame, world);
+  assert.equal(robot.debug.plans, 0, 'no fan search after the last brick');
+  assert.deepEqual(robot.debug.plan, before, 'no replacement shot plan');
+  assert.equal(world.rng.robot.state, random);
+  assert.equal(world.step, step);
+  assert.equal(world.phase, 'clearing');
+  assert.equal(frame.action, false); assert.equal(frame.overload, false); assert.equal(frame.pull, false);
+  assert.equal(frame.steer, true, 'reward collection remains active');
+  assert.ok(frame.tx > world.paddle.x, 'steer toward the falling ember');
+  E.alive[0] = 0;
+  robot.fill(frame, world);
+  assert.equal(frame.steer, false, 'wait when there is nothing to collect');
+  assert.equal(robot.debug.plans, 0);
+  assert.equal(world.rng.robot.state, random);
+});

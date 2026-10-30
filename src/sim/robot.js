@@ -1,4 +1,4 @@
-// Kiln — the robot player (OWNER: A). A Controller: fills the same InputFrame the real input
+// Kiln: the robot player (OWNER: A). A Controller: fills the same InputFrame the real input
 // module fills, from the world state only (no DOM, no clock, never writes the world). It must
 // clear all 30 levels in Node within 6 sim minutes each with at most 3 nudges (CP2, PLAN §10).
 //
@@ -333,6 +333,15 @@ export function createRobot(opts = {}) {
       frame.fast = false;
       if (world.phase === 'over' || world.phase === 'cleared') {
         frame.steer = false;
+        return;
+      }
+      // The last brick is gone. Collect rewards without searching for another shot through
+      // the remaining armour, even when a ball is still approaching during the ceremony.
+      if (world.phase === 'clearing') {
+        const mc = modeCode(world.level.mode), cur = paddleTrack(mc, world.paddle);
+        const target = usePickups ? pickupTarget(world, mc, cur, 3) : NaN;
+        frame.steer = target === target;
+        if (frame.steer) steerTo(frame, world, mc, target);
         return;
       }
       ensureGrid(world);

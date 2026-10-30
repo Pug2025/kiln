@@ -56,9 +56,15 @@ function staticFlame(host) {
   host.style.background = `linear-gradient(0deg, ${COLOR.HEAT_HI} 0%, ${COLOR.HEAT_LO} 55%, #5a1f08 100%)`;
 }
 
+const FLAME_SEGMENT_S = 600, FLAME_FADE_S = 0.25;
+function flameFade(t) {
+  const u = Math.max(0, Math.min(1, t));
+  return u * u * (3 - 2 * u);
+}
+
 /**
  * The session's one flame renderer (built on first use, never disposed).
- * @type {null | {gl:any, canvas:any, mat:any, scene:any, cam:any, owner:any, ro:any, host:any, failed:boolean}}
+ * @type {null | {gl:any, canvas:any, mat:any, scene:any, cam:any, owner:any, ro:any, host:any, failed:boolean, lost:boolean}}
  */
 let shared = null;
 
@@ -66,7 +72,7 @@ function sharedFlame() {
   if (shared) return shared;
   const canvas = document.createElement('canvas');
   canvas.className = 'kiln-wordmark-flame';
-  Object.assign(canvas.style, { position: 'absolute', inset: '0', width: '100%', height: '100%', display: 'block', borderRadius: 'inherit' });
+  Object.assign(canvas.style, { position: 'absolute', inset: '0', width: '100%', height: '100%', display: 'block', borderRadius: 'inherit', opacity: '0' });
   let gl = null;
   try {
     gl = new THREE.WebGLRenderer({ canvas, alpha: true, premultipliedAlpha: true, antialias: false, powerPreference: 'low-power' });
@@ -74,7 +80,7 @@ function sharedFlame() {
     gl = null;
   }
   if (!gl) {
-    shared = { gl: null, canvas: null, mat: null, scene: null, cam: null, owner: null, ro: null, host: null, failed: true };
+    shared = { gl: null, canvas: null, mat: null, scene: null, cam: null, owner: null, ro: null, host: null, failed: true, lost: false };
     return shared;
   }
   gl.setClearColor(0x000000, 0);
@@ -101,7 +107,17 @@ function sharedFlame() {
   const cam = new THREE.OrthographicCamera(-0.5, 0.5, 0.5, -0.5, 0, 2);
   cam.position.z = 1;
   scene.add(new THREE.Mesh(new THREE.PlaneGeometry(1, 1), mat));
-  shared = { gl, canvas, mat, scene, cam, owner: null, ro: null, host: null, failed: false };
+  shared = { gl, canvas, mat, scene, cam, owner: null, ro: null, host: null, failed: false, lost: false };
+  // These listeners belong to the single canvas, rather than accumulating on title mounts.
+  canvas.addEventListener('webglcontextlost', (e) => {
+    e.preventDefault();
+    shared.lost = true;
+    if (shared.owner) shared.owner.conceal();
+  });
+  canvas.addEventListener('webglcontextrestored', () => {
+    shared.lost = false;
+    if (shared.owner) shared.owner.restore();
+  });
   // follow the current slot's size without reading layout every frame
   if (typeof ResizeObserver !== 'undefined') {
     shared.ro = new ResizeObserver(() => {
@@ -117,6 +133,11 @@ function sharedFlame() {
  * @returns {{resize():void, frame(t:number):void, dispose():void}}
  */
 export function createWordmarkFlame(host, opts = {}) {
+  if (opts.reduceMotion) {
+    if (shared?.host === host && shared.owner) shared.owner.dispose();
+    staticFlame(host);
+    return { resize() {}, frame() {}, dispose() {} };
+  }
   const S = sharedFlame();
   if (S.failed) {
     // no WebGL: a static heat gradient, never a dark slot
@@ -125,14 +146,19 @@ export function createWordmarkFlame(host, opts = {}) {
   }
   if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
   const { gl, mat, canvas } = S;
-  let shaderOrigin = null; // a new owner starts its own decorative phase, independent of page uptime
+  // The FBM has no repeating period. Its segment restarts only behind a fully hidden canvas.
+  let shaderOrigin = null, lastFrame = null, sampledAge = 0;
+  let disposed = false, drawable = false, blocked = false;
+  let phase = 'hidden', fadeStart = 0, fadeFrom = 0, opacity = 0;
 
   const handle = {
     /** Size the shared canvas to this slot (only while this slot holds it). */
     resize() {
-      if (S.owner !== handle) return;
-      const w = Math.max(1, host.clientWidth);
-      const h = Math.max(1, host.clientHeight);
+      if (disposed || S.owner !== handle) return;
+      const w = host.clientWidth, h = host.clientHeight;
+      drawable = w > 0 && h > 0;
+      if (!drawable) { handle.conceal(); return; }
+      if (S.lost) return;
       const pr = Math.min(2, window.devicePixelRatio || 1);
       gl.setPixelRatio(pr);
       gl.setSize(w, h, false);
@@ -142,14 +168,57 @@ export function createWordmarkFlame(host, opts = {}) {
     },
     /** @param {number} t seconds */
     frame(t) {
-      if (S.owner !== handle || !Number.isFinite(t)) return;
+      if (disposed || S.owner !== handle || S.lost || blocked || !drawable || document.hidden || !Number.isFinite(t)) return;
+      if ((lastFrame !== null && t < lastFrame) || (shaderOrigin !== null && t < shaderOrigin)) return;
       if (shaderOrigin === null) shaderOrigin = t;
-      const shaderT = Math.max(0, t - shaderOrigin);
-      mat.uniforms.uTime.value = shaderT * 1.4;
-      mat.uniforms.uIntensity.value = (opts.intensity ?? 1) * (1 + 0.15 * Math.sin(shaderT * 2.1));
-      gl.render(S.scene, S.cam);
+      let age = t - shaderOrigin, alpha = opacity;
+      if (phase !== 'out' && phase !== 'hidden' && age >= FLAME_SEGMENT_S - FLAME_FADE_S) {
+        // A missed boundary must fade the last actual image, never expose a modulo jump.
+        phase = 'out'; fadeStart = t; fadeFrom = opacity;
+      }
+      if (phase === 'out') {
+        const progress = (t - fadeStart) / FLAME_FADE_S;
+        age = sampledAge;
+        alpha = fadeFrom * (1 - flameFade(progress));
+        if (progress >= 1 || fadeFrom === 0) {
+          shaderOrigin = t; age = 0; alpha = 0; phase = 'hidden';
+        }
+      } else if (phase === 'hidden') {
+        if (age >= FLAME_SEGMENT_S - FLAME_FADE_S) { shaderOrigin = t; age = 0; }
+        alpha = 0;
+      } else if (phase === 'reveal') alpha = flameFade((t - fadeStart) / FLAME_FADE_S);
+      else alpha = 1;
+      // Conceal before changing the hidden image, and reveal only after a successful draw.
+      if (alpha === 0) canvas.style.opacity = '0';
+      mat.uniforms.uTime.value = age * 1.4;
+      mat.uniforms.uIntensity.value = (opts.intensity ?? 1) * (1 + 0.15 * Math.sin(age * 2.1));
+      try { gl.render(S.scene, S.cam); }
+      catch {
+        blocked = true;
+        handle.conceal();
+        return;
+      }
+      if (disposed || S.owner !== handle || S.lost) return;
+      sampledAge = age; lastFrame = t;
+      if (opacity !== alpha) canvas.style.opacity = String(alpha);
+      opacity = alpha;
+      // No fall-through: this complete zero-opacity frame precedes every reveal.
+      if (phase === 'hidden') { phase = 'reveal'; fadeStart = t; }
+      else if (phase === 'reveal' && alpha === 1) phase = 'run';
+    },
+    conceal() {
+      if (disposed || S.owner !== handle) return;
+      canvas.style.opacity = '0'; opacity = 0; phase = 'hidden';
+    },
+    restore() {
+      if (disposed || S.owner !== handle) return;
+      blocked = false;
+      handle.conceal();
+      handle.resize();
     },
     dispose() {
+      if (disposed) return;
+      disposed = true;
       if (S.owner === handle) {
         if (S.ro) S.ro.disconnect();
         canvas.remove();
@@ -170,7 +239,8 @@ export function createWordmarkFlame(host, opts = {}) {
   if (S.ro) S.ro.disconnect();
   S.owner = handle;
   S.host = host;
-  host.style.background = '';
+  staticFlame(host);
+  canvas.style.opacity = '0';
   host.appendChild(canvas);
   if (S.ro) S.ro.observe(host);
   handle.resize();

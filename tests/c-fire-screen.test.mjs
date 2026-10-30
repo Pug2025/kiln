@@ -4,6 +4,7 @@ import { test, assert, near } from './lib.mjs';
 import * as THREE from '../vendor/three/0.160.0/build/three.module.js';
 import { FIELD, PADDLE, RING } from '../src/core/constants.js';
 import { paddleBloomRadius } from '../src/render/ball-bloom.js';
+import { paddleSourceRadius, protectBed } from '../src/render/paddle-source.js';
 
 const threeURL = new URL('../vendor/three/0.160.0/build/three.module.js', import.meta.url).href;
 register(`data:text/javascript,${encodeURIComponent(`export async function resolve(spec, ctx, next) {
@@ -37,7 +38,7 @@ test('fire planes retain their world band, UVs and normals with constant identit
 const renderer = readFileSync(new URL('../src/render/renderer.js', import.meta.url), 'utf8');
 const body = renderer.match(/function bloomMask\(w, alpha\) \{([\s\S]*?)\n  \}/)[1];
 const updateGuard = new Function('w', 'alpha', 'width', 'height', 'pr', 'projA', 'projB',
-  'padA', 'padB', 'camera', 'rig', 'bloomProjection', 'post', 'actors', 'fire', 'menuOn', body);
+  'padA', 'padB', 'camera', 'rig', 'bloomProjection', 'post', 'actors', 'fire', 'menuOn', 'kiln', 'paddleSourceRadius', body);
 
 function fixture(width = 390, height = 844, pr = 2, mode = 'bottom', lean = 0) {
   const scene = new THREE.Scene(), fire = createFire(scene);
@@ -65,10 +66,11 @@ function fixture(width = 390, height = 844, pr = 2, mode = 'bottom', lean = 0) {
   const post = { bloomOn: true, paddleBloomRadius, setBloomMask: (...args) => calls.push(args),
     setBallMasks: () => calls.push('balls') };
   const actors = { pad: { rotation: { z: (mode === 'left' ? -Math.PI / 2 : 0) + lean * .04 } } };
+  const kiln = { bedGuard: protectBed(new THREE.MeshBasicMaterial()) };
   const run = (menu = false) => updateGuard(w, .5, width, height, pr,
     new THREE.Vector3(), new THREE.Vector3(), padA, padB, camera, { fit: { rect: { scale: 1 } } },
-    new THREE.Matrix4(), post, actors, fire, menu);
-  return { fire, camera, padA, padB, post, calls, run };
+    new THREE.Matrix4(), post, actors, fire, menu, kiln, paddleSourceRadius);
+  return { fire, camera, padA, padB, post, calls, run, kiln };
 }
 
 test('fire screen uniforms default off, retain their buffers, and clear across world reset and menus', () => {
@@ -112,6 +114,11 @@ test('the actual after-camera helper gives Full and Lite the same buffer-space c
       const expectedB = [(b.x + 1) * width * pr / 2, (b.y + 1) * height * pr / 2];
       const scale = Math.hypot(expectedB[0] - expectedA[0], expectedB[1] - expectedA[1]) / f.padA.distanceTo(f.padB);
       const mask = f.calls[0], u = f.fire.main.uniforms;
+      const bedA = f.kiln.bedGuard.uniforms.uBedA.value, bedB = f.kiln.bedGuard.uniforms.uBedB.value;
+      assert.deepEqual([...bedA.slice(0, 2)], expectedA.map(Math.fround));
+      assert.deepEqual([...bedB.slice(0, 2)], expectedB.map(Math.fround));
+      assert.ok(bedA[2] >= mask[4], 'source protection contains the actual drawn body');
+      assert.equal(bedB[2], 1);
       assert.deepEqual([...u.uScreenA.value], expectedA.map(Math.fround));
       assert.deepEqual([...u.uScreenB.value], expectedB.map(Math.fround));
       near(u.uScreenR.value, mask[4] + 8 * scale, 1e-10, 'same actual hull plus eight field units');
@@ -123,6 +130,9 @@ test('the actual after-camera helper gives Full and Lite the same buffer-space c
       assert.equal(f.calls.length, 0, 'Lite adds no post draw or post setter work');
       assert.deepEqual([...u.uScreenA.value], expectedA.map(Math.fround));
       assert.equal(u.uScreenStrength.value, .95, 'source guard runs even when bloom is disabled');
+      assert.equal(bedB[2], 1, 'bed protection also refreshes with Lite bloom disabled');
+      f.run(true); assert.equal(bedB[2], 0, 'menu restores the original bed');
+      f.run(false); assert.equal(bedB[2], 1);
       f.camera.position.x += 40; f.camera.updateMatrixWorld(true); f.run();
       assert.notDeepEqual([...u.uScreenA.value], expectedA.map(Math.fround), 'camera changes cannot leave stale screen coordinates');
     }

@@ -157,7 +157,7 @@ test('the brick wall builds its ring shape up front: The Core\'s stage 3 adds no
   installCanvas(); // the marks' glyph atlas draws on a 2D canvas; Node has none
   const { createBricks } = await import('../src/render/bricks.js');
   const scene = new THREE.Group(), white = new THREE.MeshBasicMaterial();
-  const M = { tex: { glow: null }, shell: white, cavityGlass: white, titanium: white, matte: white,
+  const M = { tex: { glow: null }, shell: white, cavityGlass: white, titanium: new THREE.MeshStandardMaterial(), matte: white,
     core: white, white, white70: white, white50: white, darkMetal: white };
   const wall = createBricks(scene, M);
   const pools = () => { let n = 0; scene.traverse((o) => { if (o.isInstancedMesh) n++; }); return n; };

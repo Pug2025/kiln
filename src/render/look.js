@@ -87,6 +87,7 @@ export const LOOK = Object.freeze({
   FIRE_BY_MULT: { 1: 0.55, 2: 0.7, 3: 0.85, 5: 1.0 },
   OMEGA_BY_MULT: { 1: 1.25, 2: 1.5, 3: 1.75, 5: 2.0 },
   FIRE_EASE_S: 0.6,
+  FIRE_INTRO_S: 1.2,
   FLARE_PADDLE: 0.6,
   FLARE_PERFECT: 0.8,
   FLARE_LOST: 1.0,
@@ -107,6 +108,7 @@ export const LOOK = Object.freeze({
   // sparks (decoration, ART 8)
   SPARKS: 620,
   SPARKS_LITE: 206,
+  HAZE_DENSITY: 0.5, // haze now sits in front of the smoked plate; keep its veil restrained
   // gains on heat-high (review 2026-10-22, ART 14: bloom only on the ball, molten cores, fire and the
   // rupture; threshold 0.9 linear): decorative sparks and hit sparks stay under it, the ball's own
   // trail dots may cross it (tests/c-look checks the first two against COLOR.HEAT_HI)

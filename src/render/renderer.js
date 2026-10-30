@@ -28,6 +28,7 @@ import { LOOK } from './look.js';
 import { PAL, createMaterials, syncPaletteUniforms, unifyStandardMaterials } from './materials.js';
 import { makeEnvironment, createKiln } from './kiln.js';
 import { createFire } from './fire.js';
+import { paddleSourceRadius } from './paddle-source.js';
 import { createBricks } from './bricks.js';
 import { createActors } from './actors.js';
 import { createPieces } from './pieces.js';
@@ -135,6 +136,7 @@ export async function createRenderer(host, opts = {}) {
     onLost() {
       contextEpoch++;
       bootJob?.cancel('context-lost');
+      post.contextLost();
       // Retire while the context is lost; deleting these old GPU handles after restore is invalid.
       scene.environment?.dispose();
       scene.environment = null;
@@ -194,6 +196,7 @@ export async function createRenderer(host, opts = {}) {
     post.setMsaaOff(ladder.step >= 1);
     kiln.setLite(q.lite, ladder.step >= 2);
     fire.setLite(q.lite);
+    fire.setReducedMotion(q.reduceMotion);
     headroom.setQuality(q.lite, q.reduceMotion);
     post.setBloom(!q.lite);
     stats.lite = q.lite;
@@ -546,6 +549,8 @@ export async function createRenderer(host, opts = {}) {
       bloomProjection.elements, bw, bh, ax, ay, bx, by);
     // The same screen capsule protects both fire depths, in both Full and Lite.
     fire.setScreenLegibility(ax, ay, bx, by, radius + 8 * pxPerUnit, 80 * pxPerUnit, menuOn ? 0 : 0.95);
+    const bedRadius = paddleSourceRadius(w.paddle, w.level.mode, bloomProjection.elements, bw, bh, ax, ay, bx, by);
+    kiln.bedGuard.set(ax, ay, bx, by, Math.max(radius, bedRadius), Math.max(4 * pr, 40 * pxPerUnit), !menuOn);
     if (!post.bloomOn) return;
     post.setBloomMask(ax, ay, bx, by, radius, Math.max(2 * pr, 4 * pxPerUnit));
     post.setBallMasks(w, alpha, bloomProjection.elements, bw, bh, !menuOn);

@@ -348,7 +348,7 @@ export function createHeadroom(scene) {
   // its top (the focal detail lives in the top 45%)
   const far = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), plateMat);
   far.position.set(0, 300, FAR_Z);
-  far.renderOrder = -3; // sorted by depth with the haze planes
+  far.renderOrder = -3; // far and mid sort together; haze composites after the smoked plate
   const mid = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), midMat);
   mid.position.set(0, 300, MID_Z);
   mid.renderOrder = -3;

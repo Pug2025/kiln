@@ -94,18 +94,22 @@ export function createFire(scene) {
 
   // decorative sparks rising from the fire (GPU only)
   const N = LOOK.SPARKS;
-  const seeds = new Float32Array(N), sizes = new Float32Array(N), rnd = new Float32Array(N * 3);
+  const seeds = new Float32Array(N), sizes = new Float32Array(N), lifts = new Float32Array(N), rnd = new Float32Array(N * 3);
   let s = 12345;
   const r = () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296);
   for (let i = 0; i < N; i++) {
+    const tall = i % 4 === 0;
     seeds[i] = r();
-    sizes[i] = 1.6 + r() * 3.2 * (r() < 0.12 ? 2 : 1);
+    sizes[i] = (1.6 + r() * 3.2 * (r() < 0.12 ? 2 : 1)) * (tall ? 0.7 : 1);
+    lifts[i] = tall ? 1.35 : 1;
     rnd[i * 3] = r(); rnd[i * 3 + 1] = r(); rnd[i * 3 + 2] = r();
   }
   const sg = new THREE.BufferGeometry();
   sg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(N * 3), 3));
   sg.setAttribute('aSeed', new THREE.BufferAttribute(seeds, 1));
   sg.setAttribute('aSize', new THREE.BufferAttribute(sizes, 1));
+  // Interleaving keeps the taller, smaller quarter present in the Lite draw prefix too.
+  sg.setAttribute('aLift', new THREE.BufferAttribute(lifts, 1));
   sg.setAttribute('aRand', new THREE.BufferAttribute(rnd, 3));
   const sparkMat = new THREE.ShaderMaterial({
     transparent: true,
@@ -133,6 +137,7 @@ export function createFire(scene) {
     target: 0.55,
     targetOmega: 1.25,
     intro: 1,
+    reduceMotion: false,
     combo: 0,      // 0 at x1 .. 1 at x5 (eased with base)
     flow: 0,       // integrated noise scroll (faster at high combo)
   };
@@ -144,6 +149,12 @@ export function createFire(scene) {
       main.uniforms.uOctaves.value = lite ? 3 : 5;
       deep.visible = !lite;
       sg.setDrawRange(0, lite ? LOOK.SPARKS_LITE : LOOK.SPARKS);
+    },
+
+    /** Skip the new-world rise for reduced motion; changing quality never restarts its clock. */
+    setReducedMotion(reduced) {
+      st.reduceMotion = !!reduced;
+      if (st.reduceMotion) st.intro = 1;
     },
 
     /** Combo multiplier 1/2/3/5 sets the breathing target. */
@@ -190,6 +201,8 @@ export function createFire(scene) {
 
     /** Advance by real dt; returns the fire number. */
     update(t, dt) {
+      const introDt = Number.isFinite(dt) ? Math.min(0.1, Math.max(0, dt)) : 0;
+      st.intro = st.reduceMotion ? 1 : Math.min(1, st.intro + introDt / LOOK.FIRE_INTRO_S);
       const k = Math.min(1, dt / LOOK.FIRE_EASE_S * 3); // reaches ~95% of a step in 0.6 s
       st.base += (st.target - st.base) * k;
       st.omega += (st.targetOmega - st.omega) * k;
@@ -224,7 +237,10 @@ export function createFire(scene) {
 
     reset(resetClock = true) {
       // Restart decoration only at a world transition. Combo/flare integration stays dt-based.
-      if (resetClock) { st.phase = 0; st.flow = 0; }
+      if (resetClock) {
+        st.phase = 0; st.flow = 0;
+        st.intro = st.reduceMotion ? 1 : 0;
+      }
       for (let k = 0; k < 2; k++) mats[k].uniforms.uScreenStrength.value = 0;
       st.flare = 0;
       st.climb = 0;

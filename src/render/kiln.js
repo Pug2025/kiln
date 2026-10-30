@@ -9,6 +9,7 @@ import { PAL, PAL_VEC3 } from './materials.js';
 import { LOOK } from './look.js';
 import { PLAIN_VERT, HAZE_VERT, HAZE_FRAG, BACK_VERT, BACK_FRAG, SHAFT_FRAG, withOutput } from './shaders.js';
 import { CEILING_ART, ceilingLayout, lintelPiece, ceilingContact, isCeilingHit } from './ceiling.js';
+import { protectBed } from './paddle-source.js';
 
 const FW = FIELD.W, FH = FIELD.H;
 const HH_ = FIELD.H / 2;
@@ -137,6 +138,7 @@ export function createKiln(scene, M) {
   grate.renderOrder = 0.5;
   scene.add(grate);
   const bedMat = new THREE.MeshBasicMaterial({ map: M.tex.glow, color: PAL.heatLo.clone().multiplyScalar(0.9), transparent: true, depthWrite: false });
+  const bedGuard = protectBed(bedMat);
   const bed = new THREE.Mesh(new THREE.PlaneGeometry(1100, 1000), bedMat);
   bed.rotation.x = -Math.PI / 2;
   bed.position.set(0, -690, -560);
@@ -164,8 +166,8 @@ export function createKiln(scene, M) {
   scene.add(floor);
 
   // ---- haze (four layers in three sorted draws; lite keeps original layer two) ----
-  // Only the far pair is contiguous behind the painting over the camera's fitted range. The
-  // -260 and -90 layers stay separate: headroom can sort between them and the far pair.
+  // Keep the accepted far-pair batch and the two nearer draws in back-to-front order.
+  // All three now composite after the smoked plate; layer parameters and depths stay unchanged.
   const hazeLayers = [[-90, 0.11, 1.3, 0.2], [-260, 0.11, 4.1, 0.16], [-480, 0.12, 7.7, 0.12], [-760, 0.13, 2.2, 0.09]];
   const hazeTimes = new Float32Array(4);
   const hazeParams = new Float32Array(12);
@@ -176,7 +178,7 @@ export function createKiln(scene, M) {
   const hazeMat = new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: false,
-    uniforms: { uTimes: { value: hazeTimes }, uParams: { value: hazeParams }, uWarm: { value: 0.35 }, uHeatLo: { value: PAL_VEC3.heatLo } },
+    uniforms: { uTimes: { value: hazeTimes }, uParams: { value: hazeParams }, uDensity: { value: LOOK.HAZE_DENSITY }, uWarm: { value: 0.35 }, uHeatLo: { value: PAL_VEC3.heatLo } },
     vertexShader: HAZE_VERT,
     fragmentShader: HAZE_FRAG,
   });
@@ -201,7 +203,7 @@ export function createKiln(scene, M) {
     geo.setAttribute('aHaze', new THREE.InstancedBufferAttribute(new Float32Array(indices.length * 4), 4));
     const mesh = new THREE.InstancedMesh(geo, hazeMat, indices.length);
     mesh.name = name;
-    mesh.renderOrder = -3;
+    mesh.renderOrder = 0;
     writeHaze(mesh, indices);
     scene.add(mesh);
     return mesh;
@@ -360,7 +362,7 @@ export function createKiln(scene, M) {
   let lipY = HH_ - 1030;
 
   return {
-    hemi, key, rim, fireLight, deepLight, backMat, haze, shaftMat, bed, plate, frame,
+    hemi, key, rim, fireLight, deepLight, backMat, haze, shaftMat, bed, bedGuard, plate, frame,
     ceiling, ceilingBar, ceilingGlow,
 
     /** Frame pieces per field mode (ART 7; ring/left variants are C calls). */
@@ -370,6 +372,7 @@ export function createKiln(scene, M) {
     },
 
     setMode(mode, field) {
+      bedGuard.clear();
       ceilingLayout(mode, field, ceiling);
       ceilingBar.visible = ceilingGlow.visible = ceiling.active;
       contactT = -1e9;

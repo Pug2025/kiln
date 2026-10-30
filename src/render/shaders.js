@@ -110,7 +110,7 @@ export const HAZE_FRAG = withOutput(`
     varying vec4 vHaze;
     uniform vec3 uParams[4];
   #endif
-  uniform float uTimes[4], uWarm; uniform vec3 uHeatLo;
+  uniform float uTimes[4], uWarm, uDensity; uniform vec3 uHeatLo;
   ${NOISE}
   void main(){
     // CPU offsets retain the original float32 values even after long sessions. Constant indices
@@ -130,7 +130,7 @@ export const HAZE_FRAG = withOutput(`
     float d = smoothstep(0.35, 0.75, n * 0.7 + n2 * 0.45);
     float vert = smoothstep(0.0, 0.25, vUv.y) * smoothstep(1.0, 0.45, vUv.y);
     float side = smoothstep(0.0, 0.2, vUv.x) * smoothstep(1.0, 0.8, vUv.x);
-    float a = d * vert * side * uAlpha;
+    float a = d * vert * side * uAlpha * uDensity;
     vec3 col = mix(vec3(uTint), uHeatLo * 0.45, smoothstep(0.42, 0.0, vUv.y) * uWarm);
     gl_FragColor = vec4(col, a);
   }`);
@@ -162,14 +162,14 @@ export const SHAFT_FRAG = withOutput(`
 
 // Sparks: GPU points whose positions are a function of time and seed (no CPU work per frame).
 export const SPARK_VERT = `
-  attribute float aSeed; attribute float aSize; attribute vec3 aRand;
+  attribute float aSeed; attribute float aSize; attribute float aLift; attribute vec3 aRand;
   uniform float uTime, uScale, uWidth, uHeight, uFlare;
   varying float vLife; varying float vSeed;
   void main(){
     float speed = 0.045 + 0.07 * aRand.y;
     float life = fract(uTime * speed + aSeed); vLife = life; vSeed = aSeed;
     float x = (aRand.x - 0.5) * uWidth; x += sin(uTime * 0.6 + aSeed * 40.0) * 22.0 + sin(uTime * 1.7 + aSeed * 17.0) * 7.0;
-    float y = -560.0 + life * uHeight * (1.0 + 0.25 * uFlare);
+    float y = -560.0 + life * uHeight * aLift * (1.0 + 0.25 * uFlare);
     float z = (aRand.z - 0.5) * 260.0 - 60.0;
     vec4 mv = modelViewMatrix * vec4(x, y, z, 1.0);
     float s = aSize * (1.0 - life * 0.55) * (1.0 + uFlare * 0.5);
