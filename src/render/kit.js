@@ -91,17 +91,23 @@ export async function loadKit(h, base = KIT_BASE) {
   const M = h.M;
   const jobs = [];
 
-  // ceramic crackle (core map + normal), on the bricks, embers and ceramic fragments
-  jobs.push(Promise.all([tex('textures/crackle.png', true), tex('textures/crackle_n.png', false)]).then(([c, n]) => {
-    if (inactive() || !c || !n) { discardTexture(c); discardTexture(n); return; }
+  // Keep the registered glaze, grooves and optional vein mask in one swap. Native material
+  // samplers retain ownership and enter the same upload, warm-up and context-restore paths.
+  jobs.push(Promise.all([tex('textures/crackle.png', true), tex('textures/crackle_n.png', false), tex('textures/crackle_mask.png', false)]).then(([c, n, mask]) => {
+    if (inactive() || !c || !n) { discardTexture(c); discardTexture(n); discardTexture(mask); return; }
     for (const m of [M.core, M.fragCeramic, M.bossCore]) {
       if (!m) continue;
       m.map = c;
       if (m.normalMap !== undefined && m !== M.fragCeramic) m.normalMap = n;
+      if (m !== M.fragCeramic) {
+        m.emissiveMap = mask || c;
+        if (m.userData?.u?.uVeinMask) m.userData.u.uVeinMask.value = mask ? 1 : 0;
+      }
       m.needsUpdate = true;
     }
     M.tex.crackle = c;
     M.tex.crackleN = n;
+    if (mask) M.tex.crackleMask = mask;
   }));
 
   // indestructible matte black: a very low-contrast obsidian detail (it still reflects nothing)

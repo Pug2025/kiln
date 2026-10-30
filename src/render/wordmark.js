@@ -21,7 +21,7 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { COLOR } from '../core/constants.js';
 import { NOISE, PLAIN_VERT, withOutput } from './shaders.js';
-import { createMaterials } from './materials.js';
+import { createMaterials, createCoreState } from './materials.js';
 import { makeEnvironment } from './kiln.js';
 import { LOOK } from './look.js';
 
@@ -292,6 +292,7 @@ function sharedTitleWall() {
   M.tex.glow.dispose();
   M.tex.neutralMap?.dispose();
   M.tex.neutralNormal?.dispose();
+  M.core.color = new THREE.Color(0x383b41); // this private scene retains its procedural glaze
   // The arena's last-life palette is mutable. The title always uses its resting heat colours.
   M.core.userData.u.uHeatLo.value = new THREE.Color(COLOR.HEAT_LO);
   M.core.userData.u.uHeatHi.value = new THREE.Color(COLOR.HEAT_HI);
@@ -305,6 +306,7 @@ function sharedTitleWall() {
   const coreGeo = new RoundedBoxGeometry(C.w, C.h, C.d, C.seg, C.r);
   const heat = new THREE.InstancedBufferAttribute(new Float32Array(WALL_COUNT), 1);
   coreGeo.setAttribute('aHeat', heat);
+  coreGeo.setAttribute('aCoreState', createCoreState(WALL_COUNT));
   const core = new THREE.InstancedMesh(coreGeo, M.core, WALL_COUNT);
   const shell = new THREE.InstancedMesh(new RoundedBoxGeometry(S.w, S.h, S.d, S.seg, S.r), M.shell, WALL_COUNT);
   core.frustumCulled = shell.frustumCulled = false;

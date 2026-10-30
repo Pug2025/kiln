@@ -21,6 +21,8 @@ test('title wall: 30 real glass/core cells use fixed instance matrices and heat'
   assert.ok(wall.ready && h.classList.contains('live'));
   assert.equal(stub.STUB.instances.length, 2, 'exactly two instanced meshes');
   const [core, shell] = stub.STUB.instances;
+  assert.deepEqual(core.material.color, new stub.Color(0x383b41), 'the procedural title retains its original glaze tint');
+  assert.equal(core.material.userData.u.uVeinMask.value, 0, 'the private title does not claim an R1 mask it never loads');
   assert.equal(core.count, 30);
   assert.equal(shell.count, 30);
   assert.deepEqual(core.matrices, shell.matrices, 'cores and shells stay aligned');

@@ -22,6 +22,7 @@ function fixture(manifest, { bitmap = false, fetchResponse = null, textResponse 
   const material = name => ({ name, map: { previous: name }, normalMap: { previous: name + '-normal' }, normalScale: { previous: true }, needsUpdate: false });
   const M = { core: material('core'), fragCeramic: material('fragments'), bossCore: material('boss'),
     matte: material('matte'), matteP: material('matte-plain'), matteFree: material('matte-free'), tex: { existing: true } };
+  for (const m of [M.core, M.bossCore]) m.userData = { u: { uVeinMask: { value: 0 } } };
   const originals = Object.fromEntries(Object.entries(M).filter(([name]) => name !== 'tex').map(([name, value]) => [name, { ...value }]));
   globalThis.fetch = async (...args) => { fetches.push(args); return fetchResponse ? fetchResponse.promise : { ok: true, text: () => textResponse ? textResponse.promise : Promise.resolve(manifest) }; };
   const h = { M, isDisposed: () => state.disposed, canUpload: () => state.upload, aniso: 8,
@@ -41,6 +42,54 @@ function fixture(manifest, { bitmap = false, fetchResponse = null, textResponse 
   };
 }
 const pair = 'textures/crackle.png\ntextures/crackle_n.png';
+const trio = pair + '\ntextures/crackle_mask.png';
+
+test('registered vein mask swaps with its glaze and grooves, including the boss material, without a context upload', async () => {
+  const f = fixture(trio); f.state.upload = false;
+  const [c, n, mask] = ['glaze', 'normal', 'mask'].map(name => new stub.Texture(image(name)));
+  try {
+    const loading = f.start(); await until(() => stub.STUB.requests.length === 3);
+    f.request('textures/crackle_mask.png').onLoad(mask); await flush();
+    assert.equal(f.M.core.userData.u.uVeinMask.value, 0, 'no mask reaches a material before its registered normal');
+    assert.equal(f.M.core.map.previous, 'core');
+    f.request('textures/crackle.png').onLoad(c); f.request('textures/crackle_n.png').onLoad(n); await loading;
+    for (const m of [f.M.core, f.M.bossCore]) {
+      assert.equal(m.map, c); assert.equal(m.normalMap, n); assert.equal(m.emissiveMap, mask);
+      assert.equal(m.userData.u.uVeinMask.value, 1);
+    }
+    assert.equal(f.M.fragCeramic.map, c); assert.equal(f.M.fragCeramic.emissiveMap, undefined);
+    assert.equal(f.M.tex.crackleMask, mask);
+    assert.equal(mask.colorSpace, stub.NoColorSpace); assert.equal(mask.wrapS, stub.RepeatWrapping);
+    assert.equal(f.uploads.length, 0); assert.ok([c, n, mask].every(t => t.disposals === 0));
+  } finally { f.restore(); }
+});
+
+test('disposal before the registered trio commit releases its mask along with the glaze and normal', async () => {
+  const f = fixture(trio, { bitmap: true });
+  const images = ['glaze', 'normal', 'mask'].map(image);
+  try {
+    const loading = f.start(); await until(() => stub.STUB.requests.length === 3);
+    f.request('textures/crackle.png').onLoad(images[0]); f.request('textures/crackle_n.png').onLoad(images[1]);
+    await flush(); f.state.disposed = true; f.request('textures/crackle_mask.png').onLoad(images[2]);
+    await loading; f.untouched();
+    assert.equal(f.uploads.length, 2);
+    assert.ok(stub.STUB.textures.every(t => t.disposals === 1)); assert.ok(images.every(i => i.closes === 1));
+  } finally { f.restore(); }
+});
+
+test('a missing optional vein mask retains the registered glaze pair and the luminance fallback', async () => {
+  const f = fixture(trio), c = new stub.Texture(image('glaze')), n = new stub.Texture(image('normal'));
+  try {
+    const loading = f.start(); await until(() => stub.STUB.requests.length === 3);
+    f.request('textures/crackle.png').onLoad(c); f.request('textures/crackle_n.png').onLoad(n);
+    f.request('textures/crackle_mask.png').onError(new Error('optional mask missing')); await loading;
+    for (const m of [f.M.core, f.M.bossCore]) {
+      assert.equal(m.map, c); assert.equal(m.normalMap, n); assert.equal(m.emissiveMap, c);
+      assert.equal(m.userData.u.uVeinMask.value, 0);
+    }
+    assert.equal(f.M.tex.crackleMask, undefined); assert.equal(c.disposals, 0); assert.equal(n.disposals, 0);
+  } finally { f.restore(); }
+});
 
 test('disposed before kit loading makes no fetch, decoder, upload or assignment', async () => {
   const f = fixture(pair); f.state.disposed = true;
@@ -140,10 +189,12 @@ test('a lost context keeps decoded CPU textures assignable without upload or dis
 });
 
 test('an optional failed normal texture discards its decoded partner without changing the procedural materials', async () => {
-  const f = fixture(pair), first = new stub.Texture(image('crackle'));
+  const f = fixture(trio), first = new stub.Texture(image('crackle')), mask = new stub.Texture(image('mask'));
   try {
-    const loading = f.start(); await until(() => stub.STUB.requests.length === 2);
+    const loading = f.start(); await until(() => stub.STUB.requests.length === 3);
+    f.request('textures/crackle_mask.png').onLoad(mask);
     f.request('textures/crackle.png').onLoad(first); f.request('textures/crackle_n.png').onError(new Error('missing optional normal'));
     await loading; f.untouched(); assert.equal(first.disposals, 1); assert.equal(first.image.closes, 1);
+    assert.equal(mask.disposals, 1); assert.equal(mask.image.closes, 1);
   } finally { f.restore(); }
 });

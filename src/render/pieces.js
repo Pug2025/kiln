@@ -9,7 +9,7 @@
 
 import * as THREE from 'three';
 import { FIELD, POOL, RING, HORIZONTAL } from '../core/constants.js';
-import { PAL } from './materials.js';
+import { PAL, createCoreState } from './materials.js';
 import { withOutput } from './shaders.js';
 
 const HW = FIELD.W / 2;
@@ -50,6 +50,8 @@ export function createPieces(scene, M) {
   const bombRings = inst(new THREE.TorusGeometry(10.6, 0.6, 6, 32), M.warn, POOL.HAZARDS, 1);
   const slagGeo = new THREE.IcosahedronGeometry(8.5, 1);
   slagGeo.setAttribute('aHeat', new THREE.InstancedBufferAttribute(new Float32Array(POOL.HAZARDS).fill(1.05), 1));
+  const slagState = createCoreState(POOL.HAZARDS).setUsage(THREE.DynamicDrawUsage);
+  slagGeo.setAttribute('aCoreState', slagState);
   const slagCores = inst(slagGeo, M.core, POOL.HAZARDS);
   const slagCrust = inst(new THREE.DodecahedronGeometry(10, 0), M.matteFree, POOL.HAZARDS);
   const slagRims = inst(new THREE.TorusGeometry(10.8, 0.5, 6, 32), M.warn, POOL.HAZARDS, 1);
@@ -148,6 +150,7 @@ export function createPieces(scene, M) {
         quat.setFromAxisAngle(zAxis, t * 1.3 + i);
         m4.compose(pos, quat, scl);
         slagCores.setMatrixAt(ns, m4);
+        slagState.array[ns * 2] = ((i + 1) * 0.61803398875) % 1;
         // the crust: a squashed shell that lets the molten core show through its cracks
         scl.set(s * 0.95, s * 0.95, s * 0.55);
         m4.compose(pos, quat, scl);
@@ -168,6 +171,7 @@ export function createPieces(scene, M) {
     bombs.count = nb;
     bombRings.count = nb;
     slagCores.count = ns;
+    slagState.needsUpdate = true;
     slagCrust.count = ns;
     slagRims.count = ns;
     bombs.instanceMatrix.needsUpdate = true;

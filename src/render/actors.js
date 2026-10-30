@@ -8,7 +8,7 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { FIELD, BALL, EMBERS, DROPS, RING, PADDLE, DROP, DROP_FAMILY } from '../core/constants.js';
 import { DETAIL, dropRotation } from '../core/readability.js';
 import { LOOK } from './look.js';
-import { PAL, glassMaterial } from './materials.js';
+import { PAL, glassMaterial, createCoreState } from './materials.js';
 import { withOutput } from './shaders.js';
 import { LASER_MOUNT, laserMountsActive, laserMountPose, laserMuzzleFlash } from './laser-mounts.js';
 import { createBallStreaks } from './trail.js';
@@ -337,6 +337,8 @@ export function createActors(scene, M) {
   // ---------------------------------------------------------------- ember pickups
   const emberGeo = new THREE.DodecahedronGeometry(3.6, 0);
   emberGeo.setAttribute('aHeat', new THREE.InstancedBufferAttribute(new Float32Array(EMBERS.MAX_LIVE).fill(0.8), 1));
+  const emberState = createCoreState(EMBERS.MAX_LIVE).setUsage(THREE.DynamicDrawUsage);
+  emberGeo.setAttribute('aCoreState', emberState);
   const embers = new THREE.InstancedMesh(emberGeo, M.core, EMBERS.MAX_LIVE);
   embers.name = 'ember-pickups';
   embers.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -360,6 +362,8 @@ export function createActors(scene, M) {
   const dropCore = new THREE.InstancedMesh(new RoundedBoxGeometry(41, 15, 8, 2, 2.5), dropMatte, DROPS.MAX_LIVE);
   const megaGeo = new RoundedBoxGeometry(41, 15, 8, 2, 2.5);
   megaGeo.setAttribute('aHeat', new THREE.InstancedBufferAttribute(new Float32Array(DROPS.MAX_LIVE).fill(1.0), 1));
+  const megaState = createCoreState(DROPS.MAX_LIVE).setUsage(THREE.DynamicDrawUsage);
+  megaGeo.setAttribute('aCoreState', megaState);
   const dropMega = new THREE.InstancedMesh(megaGeo, M.core, DROPS.MAX_LIVE);
   const glyphGeo = new THREE.PlaneGeometry(17, 17);
   const aKind = new THREE.InstancedBufferAttribute(new Float32Array(DROPS.MAX_LIVE), 1);
@@ -534,6 +538,7 @@ export function createActors(scene, M) {
       scl.set(size, size, size);
       m4.compose(pos, quat, scl);
       embers.setMatrixAt(n, m4);
+      emberState.array[n * 2] = ((i + 1) * 0.61803398875) % 1;
       // a short streak behind the motion
       const vx = E.vx[i], vy = -E.vy[i];
       const sp = Math.hypot(vx, vy) || 1;
@@ -547,6 +552,7 @@ export function createActors(scene, M) {
     embers.count = n;
     streaks.count = n;
     embers.instanceMatrix.needsUpdate = true;
+    emberState.needsUpdate = true;
     streaks.instanceMatrix.needsUpdate = true;
   }
 
@@ -570,8 +576,10 @@ export function createActors(scene, M) {
       const kind = d.kind | 0;
       if (small) scl.set((hu * 2 - 6 / scale) / 41, (hv * 2 - 4 / scale) / 15, 1);
       m4.compose(pos, quat, scl);
-      if (kind === DROP.MEGA) dropMega.setMatrixAt(nm++, m4);
-      else dropCore.setMatrixAt(n - nm, m4);
+      if (kind === DROP.MEGA) {
+        megaState.array[nm * 2] = ((i + 1) * 0.61803398875) % 1;
+        dropMega.setMatrixAt(nm++, m4);
+      } else dropCore.setMatrixAt(n - nm, m4);
       if (small) {
         pos.z = 7.2; scl.set(28 / scale, 28 / scale, 1);
         m4.compose(pos, qId, scl); phoneDropBack.setMatrixAt(n, m4);
@@ -597,6 +605,7 @@ export function createActors(scene, M) {
     dropShell.count = n; dropGlyphs.count = n; dropMega.count = nm; dropCore.count = n - nm;
     for (let k = 0; k < dropMeshes.length; k++) dropMeshes[k].instanceMatrix.needsUpdate = true;
     aKind.needsUpdate = true; aTint.needsUpdate = true;
+    megaState.needsUpdate = true;
   }
 
   return {

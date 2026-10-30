@@ -9,6 +9,8 @@ import { createInputFrame } from '../src/core/input-frame.js';
 import { emit } from '../src/core/bus.js';
 import { EV } from '../src/core/events.js';
 import { contentWorld, level } from './fixtures/B/helpers.mjs';
+import { getLevel } from '../src/levels/index.js';
+import { CORE_COOL_HEAT } from '../src/render/boss-feedback.js';
 const STUB_URL = new URL('./fixtures/C/marks-three-stub.mjs', import.meta.url).href;
 register(`data:text/javascript,${encodeURIComponent(`export async function resolve(spec, ctx, next) {
   if (spec === 'three' || spec === 'three/addons/geometries/RoundedBoxGeometry.js') return { url: ${JSON.stringify(STUB_URL)}, shortCircuit: true };
@@ -285,6 +287,46 @@ test('rupture heat markers expire once and never leak into live, reformed or res
   assert.ok(r.heats().every(h => h >= 0));
   assert.equal(r.wall.heatAt(0, 0), baseHeat);
   assert.equal(original[0][1], B.count, 'pool cardinality and collision records remain unchanged');
+});
+
+test('core vein seeds follow brick identity through compaction, rupture, movement and reformation', () => {
+  const t = contentWorld(level(['c..........a'])), B = t.world.bricks, r = wallFor(t);
+  const core = r.wall.root.children.find(o => o.count > 0 && o.geometry?.attributes?.aCoreState);
+  const shell = r.wall.root.children[r.wall.root.children.indexOf(core) - 1];
+  const state = core.geometry.attributes.aCoreState, first = state.array[0], second = state.array[2];
+  assert.notEqual(first, second); assert.equal(state.itemSize, 2);
+  assert.equal(state.array[1], 0); assert.equal(state.array[3], 0);
+  t.hit(0); r.wall.broken(0, B.x[0], B.y[0], B.type[0], 1); r.draw(1.08);
+  assert.equal(state.array[0], second, 'the remaining brick keeps its atlas region in a new packed slot');
+  assert.equal(state.array[2], first, 'the rupture retains the broken brick atlas region');
+  assert.equal(state.array[3], 1, 'only the reserved rupture slot opens its veins');
+  assert.ok(Math.abs(core.matrices[1][4] - 1.05) < 1e-6, 'core expands by half its ten percent at half-life');
+  assert.ok(Math.abs(shell.matrices[1][4] - 1.015) < 1e-6, 'shell expands independently by half its three percent');
+  r.draw(2);
+  B.flags[1] |= BF.MOVING; B.px[1] = B.x[1]; B.x[1] += 10; B.version++; r.draw(2.1);
+  assert.equal(state.array[0], second, 'motion never scrolls through the atlas');
+  B.alive[0] = 1; B.hp[0] = B.hpMax[0]; B.version++; r.wall.spawned(0, 3); r.draw(3.05);
+  assert.equal(state.array[0], first); assert.equal(state.array[1], 0, 'a reformed slot clears rupture phase');
+  r.wall.setWorld(t.world); r.draw(0);
+  assert.equal(state.array[0], first); assert.equal(state.array[1], 0);
+});
+
+test('the real fused boss core keeps its heart marker through hot, guarded and rupture states', () => {
+  const t = contentWorld(getLevel(30)), B = t.world.bricks, r = wallFor(t);
+  const i = Array.from({ length: B.count }, (_, i) => i).find(i => B.type[i] === BRICK.WEAK && (B.flags[i] & BF.BOSS));
+  assert.ok(i >= 0);
+  const core = r.wall.root.children.find(o => o.geometry?.attributes?.aCoreState &&
+    Array.from({ length: o.count }, (_, s) => o.geometry.attributes.aCoreState.array[s * 2 + 1]).includes(-1));
+  const state = core.geometry.attributes.aCoreState.array, heats = core.geometry.attributes.aHeat.array;
+  const slot = Array.from({ length: core.count }, (_, s) => s).find(s => state[s * 2 + 1] === -1), seed = state[slot * 2];
+  assert.ok(Math.abs(heats[slot] - LOOK.HEAT_WEAK) < 1e-6, 'the live fused heart retains its full original heat');
+  t.world.boss.data.guard = 1; t.world.boss.data.lastCoreMs = -1000; r.draw(2);
+  assert.ok(Math.abs(heats[slot] - CORE_COOL_HEAT) < 1e-6); assert.equal(state[slot * 2 + 1], -1);
+  t.world.boss.data.guard = 0; r.draw(3);
+  assert.ok(Math.abs(heats[slot] - LOOK.HEAT_WEAK) < 1e-6);
+  B.alive[i] = 0; B.version++; r.wall.broken(i, B.x[i], B.y[i], B.type[i], 4); r.draw(4.08);
+  const ruptureSlot = Array.from({ length: core.count }, (_, s) => s).find(s => state[s * 2 + 1] === -2);
+  assert.ok(ruptureSlot >= 0); assert.equal(state[ruptureSlot * 2], seed, 'heart identity and vein region survive the final break');
 });
 
 test('burn-off, hidden and sealed cavity slots keep their original heat while world shape changes reset ruptures', () => {

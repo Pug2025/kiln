@@ -25,7 +25,7 @@ export const LOOK = Object.freeze({
   MARK_Z: 11 / 2 + 1.3, // inner marks: core front + 1.2..1.4
 
   // heat per brick type (ART 8)
-  HEAT_TIER: [0.12, 0.12, 0.5, 1.0], // index = bricks.tier (1..3); 0 falls back to tier 1
+  HEAT_TIER: [0.18, 0.18, 0.5, 1.0], // index = bricks.tier (1..3); 0 falls back to tier 1
   HEAT_NUMBERED_FULL: 0.42,
   HEAT_NUMBERED_MIN: 0.04,
   HEAT_NUMBERED_SPAN: 0.38,
@@ -37,7 +37,7 @@ export const LOOK = Object.freeze({
   EXPLOSIVE_RATE: 2.6, // rad/s
   HIT_FLASH: 0.6,
   HIT_FLASH_S: 0.16,
-  RUPTURE_FLASH: 2.4,
+  RUPTURE_FLASH: 1.3,
   RUPTURE_S: 0.16,
   BURN_S: 0.42, // BRICK_BURNT: heat climbs, the slab shrinks away, sparks rise (no fragments)
   BURN_HEAT: 1.6,

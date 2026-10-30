@@ -6,13 +6,14 @@
 //   CLEAR  cavity glass over a core (cavity shells, portals, sealed-ball cells without a core)
 //   TI     brushed titanium slab (armoured, boss armour)
 //   MATTE  matte black slab (indestructible)
-// Core and shell share one transform per slot. Shapes: the 56x26 slab (bottom mode, and turned 90
-// degrees in left mode) and a 26x26 square (ring mode), built lazily and kept for later worlds.
+// Core and shell share one transform per live slot; ruptures expand them separately. Shapes:
+// the 56x26 slab (bottom mode, turned 90 degrees in left mode) and a 26x26 square (ring mode),
+// built once and kept for later worlds.
 //
 // The static wall is rebuilt only when bricks.version changes or a brick's alive/flags/type changed
 // (cheap scan per frame, so B's choices about version bumps never leave stale instances).
 // MOVING/FALLING bricks are re-written every frame, interpolated px -> x by alpha.
-// A broken brick becomes a RUPTURE for 0.16 s (core flash +2.4), then the renderer spawns
+// A broken brick becomes a RUPTURE for 0.16 s (vein heat +1.3), then the renderer spawns
 // fragments; ruptures sit in reserved slots after the live ones.
 
 import * as THREE from 'three';
@@ -22,7 +23,7 @@ import { LOOK } from './look.js';
 import { createMarks } from './marks.js';
 import { createCoreDamage, BLOCK_FLASH_S } from './core-damage.js';
 import { isBossCore, coreProtected, blockDullsCore, CORE_COOL_HEAT } from './boss-feedback.js';
-import { PAL } from './materials.js';
+import { PAL, createCoreState } from './materials.js';
 import { STOKER_TITANIUM } from './boss.js';
 
 const HW = FIELD.W / 2;
@@ -82,13 +83,15 @@ export function createBricks(scene, M) {
       shell.frustumCulled = false;
       shell.renderOrder = hasCore ? 5 : 0;
       root.add(shell);
-      let core = null, heat = null, coreMatrix = null;
+      let core = null, heat = null, coreMatrix = null, coreState = null;
       if (hasCore) {
         const cg = coreBase.clone();
         heat = new THREE.InstancedBufferAttribute(new Float32Array(CAP), 1);
         heat.setUsage(THREE.DynamicDrawUsage);
         // Positive heat is live; negative -(1 + heat) identifies a transient rupture.
         cg.setAttribute('aHeat', heat);
+        coreState = createCoreState(CAP).setUsage(THREE.DynamicDrawUsage);
+        cg.setAttribute('aCoreState', coreState);
         core = new THREE.InstancedMesh(cg, M.core, CAP);
         core.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
         core.count = 0;
@@ -97,7 +100,7 @@ export function createBricks(scene, M) {
         coreMatrix = core.instanceMatrix.array;
       }
       groups.push({
-        g, shell, core, heat, coreMatrix,
+        g, shell, core, heat, coreMatrix, coreState,
         brickOf: new Int32Array(CAP),
         live: 0,
         count: 0,
@@ -135,7 +138,7 @@ export function createBricks(scene, M) {
 
   // ruptures (broken bricks flashing before fragments fly)
   const rupt = [];
-  for (let k = 0; k < RUPT; k++) rupt.push({ on: false, x: 0, y: 0, w: 0, h: 0, g: 0, heat: 0, t0: 0, type: 0, tier: 0, brick: -1, burn: false });
+  for (let k = 0; k < RUPT; k++) rupt.push({ on: false, x: 0, y: 0, w: 0, h: 0, g: 0, heat: 0, t0: 0, type: 0, tier: 0, brick: -1, burn: false, heart: false });
   let ruptHead = 0;
 
   // level-clear wall firing
@@ -235,6 +238,10 @@ export function createBricks(scene, M) {
       const gr = cur.groups[g];
       const slot = gr.live++;
       gr.brickOf[slot] = i;
+      if (gr.coreState) {
+        gr.coreState.array[slot * 2] = ((i + 1) * 0.61803398875) % 1;
+        gr.coreState.array[slot * 2 + 1] = isBossCore(world, i) ? -1 : 0;
+      }
       gr.noCore[slot] = (B.flags[i] & BF.CAVITY_BALL) ? 1 : 0;
       slotOf[i] = slot;
       grpOf[i] = g;
@@ -244,6 +251,7 @@ export function createBricks(scene, M) {
     for (const gr of cur.groups) {
       gr.shell.instanceMatrix.needsUpdate = true;
       if (gr.core) gr.core.instanceMatrix.needsUpdate = true;
+      if (gr.coreState) gr.coreState.needsUpdate = true;
     }
     lastCount = B.count;
     version = B.version;
@@ -410,6 +418,7 @@ export function createBricks(scene, M) {
       r.heat = i >= 0 && grpOf[i] >= 0 ? baseHeat(i, t) : 0.5;
       r.t0 = t;
       r.burn = burn;
+      r.heart = isBossCore(world, i);
       return r;
     },
     fireWall(t) {
@@ -461,10 +470,20 @@ export function createBricks(scene, M) {
           }
           const kb = el / dur;
           place[0] = r.x; place[1] = r.y; place[2] = r.w; place[3] = r.h;
-          place[4] = r.burn ? 1 - 0.85 * kb * kb : 1;
+          place[4] = r.burn ? 1 - 0.85 * kb * kb : 1 + 0.03 * kb;
           composePlace();
           setSlot(gr, n, false);
+          if (!r.burn && gr.core) {
+            place[4] = 1 + 0.10 * kb;
+            composePlace();
+            gr.core.setMatrixAt(n, m4);
+          }
           if (hb) hb[n] = r.burn ? r.heat + LOOK.BURN_HEAT * Math.min(1, kb * 1.6) : -(1 + r.heat + LOOK.RUPTURE_FLASH * Math.min(1, el / 0.08));
+          if (gr.coreState) {
+            gr.coreState.array[n * 2] = ((r.brick + 1) * 0.61803398875) % 1;
+            const phase = r.burn ? 0 : Math.min(1, el / 0.08);
+            gr.coreState.array[n * 2 + 1] = r.heart ? -(1 + phase) : phase;
+          }
           n++;
           moved = true;
         }
@@ -477,6 +496,7 @@ export function createBricks(scene, M) {
           if (gr.core) gr.core.instanceMatrix.needsUpdate = true;
         }
         if (gr.heat) gr.heat.needsUpdate = true;
+        if (gr.coreState) gr.coreState.needsUpdate = true;
       }
       marks.frame(world, alpha, t, slotOf);
       coreDamage.frame(world, alpha, t, coreProtected(world));

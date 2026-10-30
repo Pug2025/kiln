@@ -232,10 +232,38 @@ export function glassMaterial(opts = {}) {
 }
 
 // ---------------------------------------------------------------- ceramic core (per-instance heat)
+/** One retained seed and phase per core; negative phase -(1 + phase) preserves boss heart heat. */
+export function createCoreState(count) {
+  const state = new Float32Array(count * 2);
+  for (let i = 0; i < count; i++) state[i * 2] = ((i + 1) * 0.61803398875) % 1;
+  return new THREE.InstancedBufferAttribute(state, 2);
+}
+
+const CRACK_GLSL = `
+  float crack;
+  #ifdef USE_EMISSIVEMAP
+    if (uVeinMask > 0.5) {
+      vec2 veins = texture2D(emissiveMap, vCoreUv).rg;
+      float edge = max(fwidth(veins.r), 1.0 / 255.0);
+      float primary = smoothstep(0.5 - edge, 0.5 + edge, veins.r);
+      vec2 maskPx = vCoreUv * 1024.0;
+      float footprint = max(length(dFdx(maskPx)), length(dFdy(maskPx)));
+      float hairline = veins.g * 0.35 * smoothstep(0.35, 0.75, 3.0 / max(footprint, 0.001));
+      crack = max(primary, hairline);
+      if (vCoreHeart > 0.5) {
+        float lum = dot(texture2D(map, vMapUv).rgb, vec3(0.33));
+        crack = max(crack, smoothstep(0.09, 0.30, lum));
+      }
+    } else
+  #endif
+    {
+      float lum = dot(texture2D(map, vMapUv).rgb, vec3(0.33));
+      crack = smoothstep(0.09, 0.30, lum);
+    }`;
+
 const HEAT_GLSL = `
   float h = clamp(vHeat, 0.0, 3.0);
-  float lum = dot(texture2D(map, vMapUv).rgb, vec3(0.33));
-  float crack = smoothstep(0.09, 0.30, lum);
+  ${CRACK_GLSL}
   vec2 cuv = (vMapUv - 0.5) * vec2(1.0, 1.35);
   float centre = 1.0 - smoothstep(0.12, 0.62, length(cuv));
   vec3 hot = mix(uHeatLo, uHeatHi, smoothstep(0.55, 1.4, h) * (0.35 + 0.65 * centre));
@@ -254,17 +282,24 @@ const HEAT_GLSL = `
 // materials keep their existing contained-heart treatment; this is the instanced brick path.
 const BRICK_HEAT_GLSL = `
   float h = clamp(vHeat < 0.0 ? -vHeat - 1.0 : vHeat, 0.0, 3.0);
-  float lum = dot(texture2D(map, vMapUv).rgb, vec3(0.33));
-  float crack = smoothstep(0.09, 0.30, lum);
+  ${CRACK_GLSL}
   vec2 cuv = (vMapUv - 0.5) * vec2(1.0, 1.35);
   float centre = 1.0 - smoothstep(0.12, 0.62, length(cuv));
   vec3 hot = mix(uHeatLo, uHeatHi, smoothstep(0.55, 1.4, h) * (0.35 + 0.65 * centre));
-  float body = pow(min(h, 1.0), 2.0) * (0.12 + 0.42 * centre);
-  float lines = min(h, 1.2) * 0.45 * crack * (0.5 + 0.5 * centre);
+  float veinBody = uVeinMask * (1.0 - vCoreHeart);
+  float body = pow(min(h, 1.0), 2.0) * (0.12 + 0.42 * centre) * (1.0 - 0.35 * min(h, 1.0) * veinBody);
+  float veinGain = mix(0.04 + 0.65 * min(h, 1.2), 0.08 + 1.6 * min(h, 1.2), vCoreHeart);
+  float lineGain = mix(min(h, 1.2) * 0.45, veinGain, uVeinMask);
+  float lines = lineGain * crack * (0.5 + 0.5 * centre) * (1.0 + 3.0 * vRupture * uVeinMask);
   float pulse = max(h - 1.0, 0.0) * 0.12 * pow(centre, 4.0);
-  vec3 emission = hot * min(0.72, body + lines + pulse);
-  // Preserve the existing very brief, dim rupture cue. It never becomes a white flash.
-  totalEmissiveRadiance += emission * (vHeat < 0.0 ? 0.01 : 1.0);
+  // Ruptures open the veins while the slab's existing whole-core flash stays suppressed.
+  float cap = mix(0.72, mix(0.6, 1.0, vRupture), veinBody);
+  float emission = min(cap, body + lines + pulse);
+  if (vHeat < 0.0) {
+    float slab = (body + pulse) * 0.01;
+    emission = mix(emission * 0.01, min(cap, slab + lines), uVeinMask);
+  }
+  totalEmissiveRadiance += hot * emission;
   diffuseColor.rgb *= 1.0 - 0.45 * min(h, 1.0);`;
 
 /**
@@ -273,28 +308,38 @@ const BRICK_HEAT_GLSL = `
  * from the uniform uHeatValue instead.
  */
 export function coreMaterial(tex, opts = {}) {
+  const instanced = opts.instanced !== false;
   const m = new THREE.MeshStandardMaterial({
-    color: opts.color ?? 0x383b41,
+    color: opts.color ?? (instanced ? 0x413b35 : 0x383b41),
     map: tex.crackle,
     normalMap: tex.crackleN,
+    emissiveMap: tex.crackleMask || tex.crackle,
     normalScale: new THREE.Vector2(0.5, 0.5),
     roughness: 0.8,
     metalness: 0.05,
     envMapIntensity: 0.5,
   });
-  const instanced = opts.instanced !== false;
-  const u = { uHeatLo: { value: PAL_VEC3.heatLo }, uHeatHi: { value: PAL_VEC3.heatHi }, uHeatValue: { value: opts.heat ?? 0 } };
+  const u = { uHeatLo: { value: PAL_VEC3.heatLo }, uHeatHi: { value: PAL_VEC3.heatHi }, uHeatValue: { value: opts.heat ?? 0 },
+    uVeinMask: { value: tex.crackleMask ? 1 : 0 }, uSeed: { value: opts.seed ?? 0.5 } };
   m.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, u);
     sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', `#include <common>\n${instanced ? 'attribute float aHeat;' : 'uniform float uHeatValue;'}\nvarying float vHeat;`)
+      .replace('#include <common>', `#include <common>\n${instanced ? 'attribute float aHeat; attribute vec2 aCoreState;' : 'uniform float uHeatValue, uSeed;'}\nuniform float uVeinMask; varying float vHeat, vRupture, vCoreHeart; varying vec2 vCoreUv;`)
+      .replace('#include <uv_vertex>', `#include <uv_vertex>
+        float seed = ${instanced ? 'aCoreState.x' : 'uSeed'};
+        vCoreUv = vMapUv * vec2(0.2, 0.08) + fract(vec2(seed * 17.17, seed * 53.13));
+        vCoreHeart = ${instanced ? 'aCoreState.y < 0.0 ? 1.0 : 0.0' : '1.0'};
+        vRupture = ${instanced ? 'aCoreState.y < 0.0 ? -aCoreState.y - 1.0 : aCoreState.y' : '0.0'};
+        #ifdef USE_NORMALMAP
+          vNormalMapUv = mix(vNormalMapUv, vCoreUv, uVeinMask);
+        #endif`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>\nvHeat = ${instanced ? 'aHeat' : 'uHeatValue'};`);
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nvarying float vHeat; uniform vec3 uHeatLo, uHeatHi;')
-      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\n${instanced ? BRICK_HEAT_GLSL : HEAT_GLSL}`);
+      .replace('#include <common>', '#include <common>\nvarying float vHeat, vRupture, vCoreHeart; varying vec2 vCoreUv; uniform float uVeinMask; uniform vec3 uHeatLo, uHeatHi;')
+      .replace('#include <emissivemap_fragment>', instanced ? BRICK_HEAT_GLSL : HEAT_GLSL);
   };
   m.userData.u = u;
-  m.customProgramCacheKey = () => (instanced ? 'kiln-core-i-calm' : 'kiln-core-u');
+  m.customProgramCacheKey = () => (instanced ? 'kiln-core-i-veins' : 'kiln-core-u-veins');
   return m;
 }
 
