@@ -6,7 +6,7 @@
 // Phones: the same wall under the menu with no panel (never glass on glass). The wall is C's live
 // one when it exists (data.mountWall), else the current world's level-card art.
 
-import { h } from '../dom.js';
+import { h, kicker } from '../dom.js';
 import { panel, menu, stat, keyChip, button } from './parts.js';
 import { ICONS } from '../icons.js';
 
@@ -14,7 +14,8 @@ export const WIDE_TITLE = '(min-width: 1100px)';
 
 /**
  * data: { menu:[{id, label, detail}], stats:[{label, value}], onSelect(id), mountFlame(slot),
- *         muted, onMute(), wall?:{art, label}, mountWall?(slot), primary?:{id, label, detail} }
+ *         muted, onMute(), wall?:{art, label}, mountWall?(slot), primary?:{id, label, detail},
+ *         dev? (the ?dev=1 build: a Dev tag on the Menu label) }
  */
 export function title(data, { el, nav }) {
   const wide = typeof matchMedia === 'function' && matchMedia(WIDE_TITLE).matches;
@@ -44,7 +45,9 @@ export function title(data, { el, nav }) {
   } else {
     side = h('div.title-side.plain', wallBox, stats);
   }
-  el.appendChild(h('div.title-grid', mark, panel('Menu', menu(nav, items)), keys));
+  // the dev build (?dev=1) says so on the Menu label, a tag after the hairline
+  const menuPanel = data.dev ? h('div.panel', kicker('Menu', h('span.tag.dev', 'Dev')), menu(nav, items)) : panel('Menu', menu(nav, items));
+  el.appendChild(h('div.title-grid', mark, menuPanel, keys));
   el.appendChild(side);
   if (primaryBtn) nav.add(primaryBtn, () => data.onSelect(primary.id)); // after the menu rows
   // sound on/off, one tap away (M on desktop)

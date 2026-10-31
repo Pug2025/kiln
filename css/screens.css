@@ -181,6 +181,7 @@ kbd {
 .card > .kicker { padding: 0; margin: 0; flex-wrap: wrap; row-gap: 8px; letter-spacing: var(--card-track); }
 .card > .kicker::after { box-shadow: 0 0 4px rgba(7, 8, 10, .8); }
 .card .kicker .tag { color: var(--w70); }
+.panel > .kicker > .tag.dev { color: var(--text); } /* the ?dev=1 build's Menu and Levels tag */
 .card .title { margin-top: 12px; font: 600 var(--card-title)/1.05 var(--font-display); letter-spacing: -.01em; color: var(--text); }
 .card .adds { margin-top: 10px; font: 400 var(--card-adds)/1.35 var(--font-body); color: var(--w70); }
 .card .adds span { font: 500 12px/1 var(--font-body); letter-spacing: .25em; text-transform: uppercase; color: var(--w55); margin-right: 6px; }

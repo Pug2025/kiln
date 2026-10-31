@@ -14,10 +14,12 @@
 // ?debug=1 C's overlay · ?autopause=0 hide/blur/pointercancel do not pause (a hidden preview pane
 // reports the page hidden between tool calls) · ?sw=1 registers the service worker on localhost ·
 // ?mute=1 silent tab (implied by bot, qa=1, level, fixture, autopause=0) ·
-// ?fixture=<name> plays tests/fixtures/G/<name>.js's level (G's stress fixture).
+// ?fixture=<name> plays tests/fixtures/G/<name>.js's level (G's stress fixture) ·
+// ?dev=1 the dev build: its own save slot (started from the real save), every level and Overburn
+// open, a Dev tag on the menus; sound and title as normal (agents add &mute=1).
 // window.__kiln exposes world, renderer, stats and the flow for G's harness.
 
-import { SIM } from './core/constants.js';
+import { SIM, STORAGE_KEY } from './core/constants.js';
 import { forgeProgress, bankStageRewards } from './ui/resources.js';
 import { controlHints } from './ui/play-help.js';
 import { createWorld, stepWorld } from './core/world.js';
@@ -27,7 +29,7 @@ import { makeSystems } from './systems.js';
 import { getLevel, getStage, LEVELS, LEVEL_NAMES } from './levels/index.js';
 import { generateOverburn } from './levels/overburn.js';
 import { createRun } from './economy/economy.js';
-import { createSave } from './economy/save.js';
+import { createSave, DEV_KEY } from './economy/save.js';
 import { createRenderer } from './render/renderer.js';
 import { createInput } from './input/input.js';
 import { createUI } from './ui/ui.js';
@@ -56,6 +58,7 @@ const QA = {
   debug: params.get('debug') === '1',
   autopause: params.get('autopause') !== '0',
   fixture: /^[a-z0-9-]+$/.test(params.get('fixture') || '') ? params.get('fixture') : '',
+  dev: params.get('dev') === '1',
 };
 // A tab an agent or a test drives never plays out loud (lead, 19:25): ?mute=1, and ?bot=1, ?qa=1,
 // ?level=, ?fixture= or ?autopause=0 imply it; no override. Settings cannot unmute it (E's
@@ -66,8 +69,12 @@ const media = (q) => (window.matchMedia ? window.matchMedia(q) : { matches: fals
 const mqMotion = media('(prefers-reduced-motion: reduce)');
 const mqTransparency = media('(prefers-reduced-transparency: reduce)');
 const coarse = media('(pointer: coarse)');
-const SEEN_KEY = 'kiln.seen.v1';
-const BALL_KEY = 'kiln.ball.v1';
+// The dev build keeps its own help and ball keys too, starting from the real ones, so dev play
+// never changes what the real game shows or uses.
+const REAL_SEEN_KEY = 'kiln.seen.v1';
+const REAL_BALL_KEY = 'kiln.ball.v1';
+const SEEN_KEY = QA.dev ? `${REAL_SEEN_KEY}.dev` : REAL_SEEN_KEY;
+const BALL_KEY = QA.dev ? `${REAL_BALL_KEY}.dev` : REAL_BALL_KEY;
 const INSTALL_KEY = 'kiln.install.v1'; // date of the last install offer (YYYY-MM-DD)
 const END_DELAY_MS = 1500;   // real ms between the clear (after A's ceremony) and the results
 const STAGE_DELAY_MS = 600;  // The Core: next stage starts after this
@@ -79,7 +86,7 @@ const clone = (o) => (typeof structuredClone === 'function' ? structuredClone(o)
 const newSeed = () => (QA.seed || ((Date.now() ^ (Math.random() * 0x7fffffff)) >>> 0) || 1);
 
 function readSeen() {
-  try { return JSON.parse(localStorage.getItem(SEEN_KEY) || '{}') || {}; } catch { return {}; }
+  try { return JSON.parse(localStorage.getItem(SEEN_KEY) || localStorage.getItem(REAL_SEEN_KEY) || '{}') || {}; } catch { return {}; }
 }
 function writeSeen(seen) {
   try { localStorage.setItem(SEEN_KEY, JSON.stringify(seen)); } catch { /* private mode: hints show again */ }
@@ -87,8 +94,9 @@ function writeSeen(seen) {
 
 export async function boot(startup = null) {
   startup?.stage('save-ui');
-  const save = createSave();
+  const save = createSave(undefined, QA.dev ? { key: DEV_KEY, seedFrom: STORAGE_KEY } : undefined);
   const data = save.load();
+  if (QA.dev) document.title = 'Kiln dev';
   const settings = data.settings;
   // ART 15.6 D1: the old auto-lite saved lite for good; lite without liteSet was never chosen
   if (migrateLite(settings)) save.write(data);
@@ -450,7 +458,7 @@ export async function boot(startup = null) {
     const menu = [
       { id: 'play', label: 'PLAY', detail: `${String(n).padStart(2, '0')}  ${levelDef(n).name}` },
       { id: 'levels', label: 'LEVELS' },
-      overburnOpen(c) ? { id: 'overburn', label: 'OVERBURN' } : null,
+      QA.dev || overburnOpen(c) ? { id: 'overburn', label: 'OVERBURN' } : null,
       { id: 'forge', label: 'THE FORGE' },
       { id: 'settings', label: 'SETTINGS' },
       { id: 'guide', label: 'HOW TO PLAY' },
@@ -466,6 +474,7 @@ export async function boot(startup = null) {
     ui.show('title', {
       menu,
       stats,
+      dev: QA.dev,
       // desktop: the run's next step as the one primary button beside the wall (ART 15.6 D2)
       primary: { id: 'play', label: cleared ? 'Continue' : 'Play', detail: `${String(n).padStart(2, '0')}  ${levelDef(n).name}` },
       wall: { art: `img/levels/${world}.webp`, label: world === 'whiteheat' ? 'Inferno' : world === 'blaze' ? 'Blaze' : 'Ember' },
@@ -490,7 +499,8 @@ export async function boot(startup = null) {
   function showMap(selected) {
     toMenu();
     ui.show('map', {
-      model: mapModel(data, (n) => getLevel(n), LEVEL_NAMES),
+      model: mapModel(data, (n) => getLevel(n), LEVEL_NAMES, { allOpen: QA.dev }),
+      dev: QA.dev,
       selected,
       onPlay(n) { phoneFullscreen(); startRun(n); },
       onOverburn() { phoneFullscreen(); startOverburn(); },
@@ -578,7 +588,7 @@ export async function boot(startup = null) {
 
   /** The ball type chosen in The Forge (D's preference; E clamps it to what is unlocked). */
   function ballKind() {
-    try { return Number(localStorage.getItem(BALL_KEY)) || 0; } catch { return 0; }
+    try { return Number(localStorage.getItem(BALL_KEY) || localStorage.getItem(REAL_BALL_KEY)) || 0; } catch { return 0; }
   }
   function setBallKind(id) {
     try { localStorage.setItem(BALL_KEY, String(id)); } catch { /* the default ball */ }
@@ -777,7 +787,7 @@ export async function boot(startup = null) {
     diagnostic: (info) => startup?.note(info),
   });
   function installOffer() {
-    if (app.installShown || !pwa.installable()) return null;
+    if (QA.dev || app.installShown || !pwa.installable()) return null; // never install the dev build
     app.installShown = true;
     // once a day at most: an offer every session would nag
     const today = new Date().toISOString().slice(0, 10);

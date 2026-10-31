@@ -115,8 +115,9 @@ export function recordClear(save, n, levelScore) {
  * @param {{campaign:{unlocked:number, best:Object, cleared:Object}, overburn:{best:number, bestWave:number}}} save
  * @param {(n:number) => ({name?:string, adds?:string, kind?:string}|null)} getDef
  * @param {string[]} names  LEVEL_NAMES (index = level number)
+ * @param {{allOpen?:boolean}} [opts]  allOpen (the ?dev=1 build): every level and Overburn open
  */
-export function mapModel(save, getDef, names) {
+export function mapModel(save, getDef, names, { allOpen = false } = {}) {
   const c = save.campaign;
   const worlds = [
     { id: 'ember', name: 'Ember', from: 1 },
@@ -126,7 +127,7 @@ export function mapModel(save, getDef, names) {
     const levels = [];
     for (let n = w.from; n < w.from + 10; n++) {
       const def = getDef(n);
-      const open = n <= (c.unlocked | 0 || 1);
+      const open = allOpen || n <= (c.unlocked | 0 || 1);
       levels.push({
         n,
         name: (def && def.name) || names[n] || `Level ${n}`,
@@ -140,7 +141,7 @@ export function mapModel(save, getDef, names) {
   });
   return {
     worlds,
-    overburn: { open: overburnOpen(c), best: save.overburn.best | 0, bestWave: save.overburn.bestWave | 0 },
+    overburn: { open: allOpen || overburnOpen(c), best: save.overburn.best | 0, bestWave: save.overburn.bestWave | 0 },
     current: continueLevel(c),
   };
 }

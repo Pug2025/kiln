@@ -3,7 +3,7 @@
 // the selected level and the one primary button. Mouse: hover selects, click plays. Touch: the
 // first tap selects, a second tap on the same cell plays. Keys: arrows move, Enter plays.
 
-import { h, pad2 } from '../dom.js';
+import { h, pad2, kicker } from '../dom.js';
 import { panel, button, stat } from './parts.js';
 import { formatScore } from '../layout.js';
 
@@ -11,7 +11,7 @@ const KIND = { bonus: 'Bonus', boss: 'Boss' };
 
 /**
  * data: { model: mapModel(), selected?: n, tab?: 'ember'|'blaze'|'whiteheat'|'overburn',
- *         onPlay(n), onOverburn(), onBack() }
+ *         onPlay(n), onOverburn(), onBack(), dev? (the ?dev=1 build: a Dev tag on the Levels label) }
  */
 export function map(data, { el, nav }) {
   const m = data.model;
@@ -42,7 +42,9 @@ export function map(data, { el, nav }) {
   const back = button(null, 'Back', () => data.onBack && data.onBack());
 
   const art = h('img.world-art', { alt: '', decoding: 'async', draggable: 'false' });
-  el.appendChild(h('div.stack.wide', panel('Levels', h('div.tabs', { role: 'tablist' }, tabEls), art, cells, card, h('div.foot', back))));
+  const body = [h('div.tabs', { role: 'tablist' }, tabEls), art, cells, card, h('div.foot', back)];
+  // the dev build (?dev=1): every level open, said by a tag on the Levels label
+  el.appendChild(h('div.stack.wide', data.dev ? h('div.panel', kicker('Levels', h('span.tag.dev', 'Dev')), ...body) : panel('Levels', ...body)));
 
   // nav order: tabs, cells, play, back
   tabEls.forEach((b, i) => nav.add(b, () => showTab(tabsDef[i].id, true)));

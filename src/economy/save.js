@@ -7,6 +7,8 @@
 // bad numbers fall back to defaults, ranks and volumes are clamped. A corrupt save never stops the
 // game: it loads as a fresh save, and the unreadable string is copied to BAD_KEY first so the
 // progress in it is not lost for good. Every version bump adds a migration step and a test.
+// A second slot (DEV_KEY, the ?dev=1 build) is the same save under another key. The first time it
+// loads it starts from the real save; nothing in that slot is ever written back to the real one.
 
 import { STORAGE_KEY } from '../core/constants.js';
 import { FORGE_IDS, MAX_RANK } from './forge.js';
@@ -14,6 +16,8 @@ import { FORGE_IDS, MAX_RANK } from './forge.js';
 export const SAVE_VERSION = 1;
 /** Where load() keeps a stored string it could not read (the next write replaces the main key). */
 export const BAD_KEY = `${STORAGE_KEY}.bad`;
+/** The ?dev=1 build's own slot, so dev play never changes the real progress. */
+export const DEV_KEY = `${STORAGE_KEY}.dev`;
 
 /** @returns {import('../core/types.js').SaveData} */
 export function defaultSave() {
@@ -139,25 +143,43 @@ export function memoryStorage() {
 
 /**
  * @param {{getItem(k:string):string|null, setItem(k:string, v:string):void, removeItem(k:string):void}} [storage]
+ * @param {{key?:string, seedFrom?:string}} [opts]  key: the slot (default the real save). seedFrom:
+ *   an empty slot starts from this key's save, which is only ever read.
  * @returns {import('../core/types.js').Save}
  */
-export function createSave(storage) {
+export function createSave(storage, { key = STORAGE_KEY, seedFrom = '' } = {}) {
   let store = storage;
   if (!store) {
     try {
       store = globalThis.localStorage;
-      store.getItem(STORAGE_KEY);
+      store.getItem(key);
     } catch {
       store = null;
     }
   }
   if (!store) store = memoryStorage();
+  // An empty slot takes the seedFrom save and stores it at once, so this happens a single time.
+  function seed() {
+    let data = defaultSave();
+    try {
+      const parsed = JSON.parse(store.getItem(seedFrom) || 'null');
+      if (isObj(parsed)) data = migrate(parsed);
+    } catch {
+      /* unreadable: the slot starts from a fresh save */
+    }
+    try {
+      store.setItem(key, JSON.stringify(data));
+    } catch {
+      /* storage full or blocked: play on */
+    }
+    return data;
+  }
   return {
     load() {
       let raw = null;
       try {
-        raw = store.getItem(STORAGE_KEY);
-        if (!raw) return defaultSave();
+        raw = store.getItem(key);
+        if (!raw) return seedFrom ? seed() : defaultSave();
         const parsed = JSON.parse(raw);
         if (isObj(parsed)) return migrate(parsed);
       } catch {
@@ -167,7 +189,7 @@ export function createSave(storage) {
       // it, so the progress can still be recovered by hand.
       if (raw) {
         try {
-          store.setItem(BAD_KEY, raw);
+          store.setItem(`${key}.bad`, raw);
         } catch {
           /* storage full or blocked: play on */
         }
@@ -176,14 +198,14 @@ export function createSave(storage) {
     },
     write(data) {
       try {
-        store.setItem(STORAGE_KEY, JSON.stringify(migrate(data)));
+        store.setItem(key, JSON.stringify(migrate(data)));
       } catch {
         /* storage full or blocked: play on */
       }
     },
     reset() {
       try {
-        store.removeItem(STORAGE_KEY);
+        store.removeItem(key);
       } catch {
         /* ignore */
       }
