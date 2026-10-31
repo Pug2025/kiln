@@ -658,7 +658,7 @@ export async function boot(startup = null) {
           app.run.overburnWave = step.wave; // D call: E's run field has no setter; E reads it for bests
           enterLevel(generateOverburn(dailySeed(), step.wave), false);
         },
-        onMap: () => { endRun('quit'); showMap(31); } });
+        onMap: () => { endRun('quit'); showMap(31); } }, { world: 'overburn' }, step.wave);
       return;
     }
     if (step.type === 'campaign') {
@@ -686,16 +686,21 @@ export async function boot(startup = null) {
         enterLevel(nd, false);
       },
       onMap: () => { endRun('quit'); showMap(step.n); },
-    });
+    }, next);
   }
 
-  function results(d) {
+  function results(d, nextDef, nextWave) {
     renderer.setMenu(true);
     ui.setHudVisible(false);
     ui.card(null);
     // the clear frame already ran the last step, the bank and the save (C's frame-time runs saw
     // 21 to 27 ms there): the results DOM is built in the next task, unless a screen came first
-    setTimeout(() => { if (!ui.current) ui.show('results', d); }, 0);
+    setTimeout(() => {
+      if (!ui.current) {
+        ui.show('results', d);
+        if (nextDef) renderer.prefetchHeadroom?.(nextDef, nextWave);
+      }
+    }, 0);
     if (QA.bot) setTimeout(() => { if (ui.current === 'results') d.onNext(); }, 1200);
   }
 

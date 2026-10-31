@@ -534,6 +534,7 @@
 /**
  * @typedef {object} Renderer  (C) src/render/renderer.js — createRenderer(host, opts) → Promise<Renderer>
  * @property {(world:World) => void} setWorld     new level/attempt: rebuild instances, reset its bus reader
+ * @property {(def:{world?:string, boss?:string}, wave?:number) => void} [prefetchHeadroom] decode one next art set on CPU after results appear
  * @property {(world:World, alpha:number, realDt:number) => void} frame   draw; alpha = interpolation 0…1
  * @property {() => void} resize
  * @property {(q:{lite?:boolean, reduceMotion?:boolean}) => void} setQuality

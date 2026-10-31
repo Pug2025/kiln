@@ -1,6 +1,7 @@
 // Actual production loader, with only Three loaders and fetch replaced by controllable IO.
 import { register } from 'node:module';
 import { test, assert } from './lib.mjs';
+import { createHeadroomAssets } from '../src/render/headroom-assets.js';
 const stubURL = new URL('./fixtures/C/kit-loader-stub.mjs', import.meta.url).href;
 register(`data:text/javascript,${encodeURIComponent(`export async function resolve(spec,ctx,next){if(spec==='three'||spec==='three/addons/loaders/GLTFLoader.js')return{url:${JSON.stringify(stubURL)},shortCircuit:true};return next(spec,ctx);}`)}`);
 const stub = await import(stubURL);
@@ -19,6 +20,7 @@ function fixture(manifest, { bitmap = false, fetchResponse = null, textResponse 
   const previousFetch = globalThis.fetch, previousBitmap = globalThis.createImageBitmap;
   if (bitmap) globalThis.createImageBitmap = () => {}; else delete globalThis.createImageBitmap;
   const state = { disposed: false, upload: true }, uploads = [], callbacks = [], fetches = [];
+  const headroomJobs = [];
   const material = name => ({ name, map: { previous: name }, normalMap: { previous: name + '-normal' }, normalScale: { previous: true }, needsUpdate: false });
   const M = { core: material('core'), fragCeramic: material('fragments'), bossCore: material('boss'),
     matte: material('matte'), matteP: material('matte-plain'), matteFree: material('matte-free'), tex: { existing: true } };
@@ -29,6 +31,10 @@ function fixture(manifest, { bitmap = false, fetchResponse = null, textResponse 
     gl: { initTexture(texture) { uploads.push(texture); assert.equal(state.disposed, false, 'no upload after renderer disposal'); assert.equal(state.upload, true, 'no upload while context is lost'); } },
     onDropAtlas: (...args) => { callbacks.push(['drop', ...args]); assert.equal(state.disposed, false); },
     onPlate: (...args) => { callbacks.push(['plate', ...args]); assert.equal(state.disposed, false); },
+    onHeadroomReady(ready, decode) {
+      for (const path of ready) if (path.startsWith('img/headroom/')) headroomJobs.push(decode(path, true)
+        .then(texture => { if (texture) callbacks.push(['plate', path.split('/').at(-1).split('.')[0], texture]); }));
+    },
     onModel: (...args) => { callbacks.push(['model', ...args]); assert.equal(state.disposed, false); },
   };
   function untouched() {
@@ -36,13 +42,35 @@ function fixture(manifest, { bitmap = false, fetchResponse = null, textResponse 
     assert.deepEqual(M.tex, { existing: true }); assert.deepEqual(callbacks, []);
   }
   return { state, uploads, callbacks, fetches, M, h, untouched,
-    start: () => loadKit(h, 'https://kit.test/'),
+    start: async () => { const ready = await loadKit(h, 'https://kit.test/'); await Promise.all(headroomJobs); return ready; },
     request(path) { const request = stub.STUB.requests.find(row => row.url.endsWith(path)); assert.ok(request, path + ' requested'); return request; },
     restore() { globalThis.fetch = previousFetch; if (previousBitmap === undefined) delete globalThis.createImageBitmap; else globalThis.createImageBitmap = previousBitmap; },
   };
 }
 const pair = 'textures/crackle.png\ntextures/crackle_n.png';
 const trio = pair + '\ntextures/crackle_mask.png';
+
+test('READY exposes decode-only headroom IO before common completion, without eager inactive-world requests', async () => {
+  const manifest = ['glyphs/drops.png', 'img/headroom/ember.webp', 'img/headroom/ember_glow.png', 'img/headroom/blaze.webp'];
+  const f = fixture(manifest.join('\n')), bound = [], uploaded = [];
+  const assets = createHeadroomAssets({ select() {}, detach() {}, bind: (...args) => bound.push(args), upload: t => uploaded.push(t) });
+  assets.activate('ember');
+  f.h.onHeadroomReady = (ready, decode) => assets.configure(ready, decode);
+  try {
+    let completed = false; const loading = f.start().then(() => { completed = true; });
+    await until(() => stub.STUB.requests.length === 3);
+    assert.ok(!stub.STUB.requests.some(r => r.url.endsWith('blaze.webp')));
+    const far = new stub.Texture(image('far')), mask = new stub.Texture(image('mask'));
+    f.request('img/headroom/ember.webp').onLoad(far); f.request('img/headroom/ember_glow.png').onLoad(mask); await flush();
+    assert.equal(completed, false, 'common download still pending');
+    assert.equal(bound.at(-1)[1].far, far); assert.deepEqual(uploaded, [far, mask]);
+    assert.equal(far.colorSpace, stub.SRGBColorSpace); assert.equal(mask.colorSpace, stub.NoColorSpace);
+    assert.equal(f.uploads.length, 0, 'headroom decoder never eagerly uploads');
+    f.request('glyphs/drops.png').onLoad(new stub.Texture(image('drop'))); await loading;
+    assert.equal(f.uploads.length, 1, 'common drop retains its existing eager upload');
+    assets.dispose(); assert.equal(far.image.closes, 1); assert.equal(mask.image.closes, 1);
+  } finally { f.restore(); }
+});
 
 test('registered vein mask swaps with its glaze and grooves, including the boss material, without a context upload', async () => {
   const f = fixture(trio); f.state.upload = false;

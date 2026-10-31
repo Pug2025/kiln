@@ -20,9 +20,10 @@ import { PAL_VEC3 } from './materials.js';
 import { LOOK } from './look.js';
 import { NOISE, withOutput } from './shaders.js';
 import { screenToPlane, projectWorld } from './fit.js';
+import { HEADROOM_KEYS, headroomKey } from './headroom-assets.js';
 
 const HH = FIELD.H / 2;
-export const PLATES = ['ember', 'blaze', 'whiteheat', 'stoker', 'crucible', 'core'];
+export const PLATES = HEADROOM_KEYS;
 const FAR_Z = -240;
 const MID_Z = -140;
 const ART_ASPECT = 2 / 3;      // portrait 1024 x 1536 plates
@@ -180,11 +181,7 @@ function paintPlate(name) {
     img.data[i] += n; img.data[i + 1] += n; img.data[i + 2] += n;
   }
   g.putImageData(img, 0, 0);
-  const tf = new THREE.CanvasTexture(far);
-  tf.colorSpace = THREE.SRGBColorSpace;
-  const tm = new THREE.CanvasTexture(mid);
-  tm.colorSpace = THREE.SRGBColorSpace;
-  return { far: tf, mid: tm, mask: null };
+  return { far, mid };
 }
 
 // ---------------------------------------------------------------- shaders
@@ -302,12 +299,22 @@ const MID_FRAG = withOutput(`
  * @param {THREE.Scene} scene
  */
 export function createHeadroom(scene) {
-  const plates = {};
-  const placeholder = {};
+  const canvases = {};
+  let bundle = null, fallback = null, fallbackName = '', disposed = false;
+  function releaseFallback() {
+    if (!fallback) return;
+    fallback.far.dispose(); fallback.mid.dispose();
+    fallback = null; fallbackName = '';
+  }
   const getPlate = (name) => {
-    if (plates[name]) return plates[name];
-    if (!placeholder[name]) placeholder[name] = paintPlate(name);
-    return placeholder[name];
+    if (bundle?.key === name && bundle.far) return bundle;
+    if (fallbackName !== name) {
+      const data = canvases[name] || (canvases[name] = paintPlate(name));
+      fallback = { far: new THREE.CanvasTexture(data.far), mid: new THREE.CanvasTexture(data.mid), mask: null };
+      fallback.far.colorSpace = fallback.mid.colorSpace = THREE.SRGBColorSpace;
+      fallbackName = name;
+    }
+    return fallback;
   };
 
   const blank = new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1);
@@ -448,7 +455,7 @@ export function createHeadroom(scene) {
 
   function use(name, grade) {
     const p = getPlate(name);
-    const kit = !!p.kit;
+    const kit = p === bundle;
     st.name = name;
     st.kit = kit;
     const u = plateMat.uniforms, v = midMat.uniforms;
@@ -474,6 +481,22 @@ export function createHeadroom(scene) {
     v.uShift.value.set(0, 0);
     v.uPart.value = kit && name === 'core' ? st.corePart : 0;
     mid.visible = !!p.mid; // lite keeps the mid at rest (ARTKIT "plus the mid at rest")
+    if (kit) releaseFallback(); // Final samplers are installed before procedural GPU eviction.
+  }
+
+  function detach() {
+    plateMat.uniforms.uMap.value = plateMat.uniforms.uMask.value = blank;
+    midMat.uniforms.uMid.value = blank;
+    mid.visible = false;
+    bundle = null;
+    releaseFallback();
+  }
+
+  function select(name, current = null, grade = plateMat.uniforms.uGrade.value) {
+    if (disposed) return;
+    if (name !== st.name) detach();
+    if (current?.key === name && current.far) bundle = current;
+    use(name, grade);
   }
 
   return {
@@ -509,31 +532,22 @@ export function createHeadroom(scene) {
       midMat.uniforms.uWallY.value = wallUv;
     },
 
-    /** A final plate from the kit: name = ember | ember_mid | ember_glow (or _mask) | ... */
-    setPlate(key, tex) {
-      const m = /^(\w+?)(?:_(mid|mask|glow))?$/.exec(key);
-      if (!m || !PLATES.includes(m[1])) return;
-      const name = m[1];
-      const p = plates[name] || (plates[name] = { far: null, mid: null, mask: null, kit: true });
-      if (m[2] === 'mid') p.mid = tex;
-      else if (m[2] === 'mask' || m[2] === 'glow') p.mask = tex;
-      else p.far = tex;
-      if (!p.far) return;
-      if (st.name === name) use(name, plateMat.uniforms.uGrade.value);
+    select, detach,
+
+    /** Borrow only the active owner's bundle; no hidden materials retain other worlds. */
+    setBundle(name, current) {
+      if (disposed || st.name !== name || !current.far) return;
+      bundle = current;
+      use(name, plateMat.uniforms.uGrade.value);
     },
 
     setWorld(world) {
       const def = world.level.def;
-      let name = def.boss || def.world || 'ember';
-      let grade = 0;
-      if (name === 'overburn') {
-        name = ['ember', 'blaze', 'whiteheat'][Math.max(0, (world.run.overburnWave | 0) - 1) % 3];
-        grade = 1;
-      }
-      if (!PLATES.includes(name)) name = 'ember';
+      const name = headroomKey(def, world.run?.overburnWave);
+      const grade = !def.boss && def.world === 'overburn' ? 1 : 0;
       // The Core's petals close for stages 1 and 2 (also in lite and reduced motion: a stage state)
       st.corePart = name === 'core' ? CORE_PART[Math.max(1, Math.min(3, def.stage || 1))] : 0;
-      use(name, grade);
+      select(name, null, grade);
       st.clearT0 = -1;
       st.boss = 0;
       st.lastPhase = world.boss ? world.boss.phase : 0;
@@ -554,6 +568,15 @@ export function createHeadroom(scene) {
 
     bossPulse() {
       st.boss = 1;
+    },
+
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      detach();
+      scene.remove(far, mid);
+      far.geometry.dispose(); mid.geometry.dispose();
+      plateMat.dispose(); midMat.dispose(); blank.dispose();
     },
 
     frame(world, t, dt, fire, shaderT = t) {

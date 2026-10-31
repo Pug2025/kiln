@@ -37,6 +37,7 @@ import { createTrail } from './trail.js';
 import { createBoss } from './boss.js';
 import { bossContactKind } from './boss-feedback.js';
 import { createHeadroom } from './headroom.js';
+import { createHeadroomAssets, headroomKey } from './headroom-assets.js';
 import { createFx } from './fx.js';
 import { createReadability, updateReadability } from '../core/readability.js';
 import { createRig } from './rig.js';
@@ -118,6 +119,11 @@ export async function createRenderer(host, opts = {}) {
   const trailFx = createTrail(scene);
   const overlays = createOverlays(scene);
   const headroom = createHeadroom(scene);
+  const headroomAssets = createHeadroomAssets({
+    select: (key, bundle) => headroom.select(key, bundle), bind: (key, bundle) => headroom.setBundle(key, bundle),
+    detach: () => headroom.detach(), upload: (texture) => gl.initTexture(texture),
+  });
+  let backdrop = null; // Existing shared download; C5 will supply its visual consumer.
   const rig = createRig(camera);
   const details = createReadability();
   const post = createPost(gl, scene, camera);
@@ -135,6 +141,7 @@ export async function createRenderer(host, opts = {}) {
     host,
     onLost() {
       contextEpoch++;
+      headroomAssets.contextLost();
       bootJob?.cancel('context-lost');
       post.contextLost();
       // Retire while the context is lost; deleting these old GPU handles after restore is invalid.
@@ -148,6 +155,7 @@ export async function createRenderer(host, opts = {}) {
       // PMREM's rendered contents do not survive a context loss. Rebuild before any restored
       // materials are prepared or drawn, using the same procedural kiln and resting palette.
       scene.environment = makeEnvironment(gl);
+      headroomAssets.contextRestored();
       boss.refreshMaps();
       warmUp();
     },
@@ -501,7 +509,8 @@ export async function createRenderer(host, opts = {}) {
       aniso: Math.min(8, gl.capabilities.getMaxAnisotropy()),
       onDropAtlas: (texture) => actors.setDropAtlas(texture),
       onModel: (id, model) => boss.setModel(id, model),
-      onPlate: (name, texture) => headroom.setPlate(name, texture),
+      onPlate: (name, texture) => { backdrop = texture; },
+      onHeadroomReady: (ready, decode) => headroomAssets.configure(ready, decode),
     }).then(() => {
       if (!disposed) { boss.refreshMaps(); warmUp(); }
     }).catch((error) => { if (!disposed) console.warn('[kiln] optional art preparation', error); });
@@ -633,6 +642,7 @@ export async function createRenderer(host, opts = {}) {
       pieces.setWorld(w);
       boss.setWorld(w);
       overlays.setWorld(w);
+      headroomAssets.activate(headroomKey(w.level.def, w.run?.overburnWave));
       headroom.setWorld(w);
       resize();
       trailFx.reset();
@@ -641,6 +651,10 @@ export async function createRenderer(host, opts = {}) {
       clearHold = 0;
       breakBoost = 0;
       rig.intro(t);
+    },
+
+    prefetchHeadroom(def, wave = 0) {
+      headroomAssets.prefetch(headroomKey(def, wave));
     },
 
     frame(w, alpha, realDt) {
@@ -803,14 +817,20 @@ export async function createRenderer(host, opts = {}) {
     get quality() {
       return q;
     },
-    _internals: { glWatch, gl, scene, camera, rig, post, fire, bricks, actors, pieces, boss, overlays, headroom, fx, kiln, M },
+    _internals: { glWatch, gl, scene, camera, rig, post, fire, bricks, actors, pieces, boss, overlays, headroom, headroomAssets, fx, kiln, M },
 
     dispose() {
+      if (disposed) return;
       disposed = true;
       bootJob?.cancel('disposed');
       glWatch.dispose();
       scene.environment?.dispose();
       scene.environment = null;
+      headroomAssets.dispose();
+      headroom.dispose();
+      backdrop?.dispose();
+      backdrop?.image?.close?.();
+      backdrop = null;
       post.dispose();
       actors.dispose();
       gl.dispose();

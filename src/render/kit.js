@@ -20,7 +20,7 @@ export function parseReady(text) {
 }
 
 /**
- * @param {object} h hooks: { M, onDropAtlas(tex), onModel(id, scene), onPlate(name, tex), aniso, isDisposed?, canUpload? }
+ * @param {object} h hooks: { M, onDropAtlas(tex), onModel(id, scene), onPlate(name, tex), onHeadroomReady(ready, decode), aniso, isDisposed?, canUpload? }
  * @returns {Promise<Set<string>>} the final files that were found
  */
 export async function loadKit(h, base = KIT_BASE) {
@@ -63,14 +63,14 @@ export async function loadKit(h, base = KIT_BASE) {
   const bitmaps = typeof createImageBitmap !== 'undefined' && !(safari >= 0 && safari < 17) && !(firefox >= 0 && firefox < 98);
   const texLoader = new THREE.TextureLoader();
   const bmpLoader = bitmaps ? new THREE.ImageBitmapLoader().setOptions({ imageOrientation: 'flipY', premultiplyAlpha: 'none', colorSpaceConversion: 'none' }) : null;
-  const tex = (path, srgb, repeat = true) => new Promise((resolve) => {
+  const tex = (path, srgb, repeat = true, upload = true) => new Promise((resolve) => {
     if (inactive() || !ready.has(path)) return resolve(null);
     const done = (t) => {
       if (inactive()) { discardTexture(t); resolve(null); return; }
       if (repeat) t.wrapS = t.wrapT = THREE.RepeatWrapping;
       t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
       t.anisotropy = h.aniso || 4;
-      if (h.gl && h.gl.initTexture && (!h.canUpload || h.canUpload())) {
+      if (upload && h.gl && h.gl.initTexture && (!h.canUpload || h.canUpload())) {
         try { h.gl.initTexture(t); } catch { /* uploads on first draw instead */ }
       }
       resolve(t);
@@ -88,6 +88,9 @@ export async function loadKit(h, base = KIT_BASE) {
       });
     } else texLoader.load(url, done, undefined, () => resolve(null));
   });
+  // Headroom has its own bounded current/prefetch owner. Expose decode-only loading before
+  // the common jobs finish, without making their completion wait on optional world art.
+  h.onHeadroomReady?.(ready, (path, srgb) => tex(path, srgb, false, false));
   const M = h.M;
   const jobs = [];
 
@@ -147,16 +150,9 @@ export async function loadKit(h, base = KIT_BASE) {
     }).catch(() => {}));
   }
 
-  // headroom plates (ART 12a): img/headroom/<name>.webp when final
-  if (h.onPlate) {
-    for (const path of ready) {
-      const m = /^img\/headroom\/([\w-]+)\.(webp|png|jpg)$/.exec(path);
-      if (!m) continue;
-      // masks (_glow, _mask) are linear grey; plates and mid layers are sRGB
-      jobs.push(tex(path, !/_(glow|mask)$/.test(m[1]), false).then((t) => { if (inactive()) discardTexture(t); else if (t) h.onPlate(m[1], t); }));
-    }
-    if (ready.has('img/backdrop.webp')) jobs.push(tex('img/backdrop.webp', true, false).then((t) => { if (inactive()) discardTexture(t); else if (t) h.onPlate('backdrop', t); }));
-  }
+  // Keep the shared backdrop on its existing loader path; its future consumer is C5 work.
+  if (h.onPlate && ready.has('img/backdrop.webp')) jobs.push(tex('img/backdrop.webp', true, false)
+    .then((t) => { if (inactive()) discardTexture(t); else if (t) h.onPlate('backdrop', t); }));
 
   await Promise.all(jobs);
   return ready;

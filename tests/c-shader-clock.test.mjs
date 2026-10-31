@@ -8,6 +8,7 @@ import { createBus, createReader, resetReader, next, emit } from '../src/core/bu
 import { LOOK } from '../src/render/look.js';
 import { CEILING_ART } from '../src/render/ceiling.js';
 import { FIELD } from '../src/core/constants.js';
+import { headroomKey } from '../src/render/headroom-assets.js';
 import { physicsWorld } from './fixtures/A/sim.mjs';
 const threeURL = new URL('../vendor/three/0.160.0/build/three.module.js', import.meta.url).href;
 const addonURL = new URL('../vendor/three/0.160.0/examples/jsm/', import.meta.url).href;
@@ -44,7 +45,8 @@ function rendererHarness(lifetime = 0) {
     esc: 0, menuOn: false, menuSkip: 0, menuStride: 3, disposed: false,
     EV, PHASE_CODE, LOOK, createReader, resetReader, next, HW: FIELD.W / 2, HH: FIELD.H / 2,
     bossContactKind: () => '',
-    fire, scene, camera: {}, M: {}, canvas: {}, vignette: {}, restCam: {},
+    fire, scene, camera: {}, M: {}, canvas: {}, vignette: {}, restCam: {}, headroomKey,
+    headroomAssets: { activate: record('headroom.activate'), prefetch: record('headroom.prefetch') },
     q: { lite: false, reduceMotion: false }, pools: [],
     stats: { worst: { ms: Infinity }, frameMs: 0 },
     glWatch: { lost: false }, gl: { info: { reset() {}, render: { calls: 0, triangles: 0 }, programs: [] } },
@@ -172,7 +174,15 @@ test('actual kiln, headroom, fog and Fire ribbon take local sampling time while 
   kiln.update(80000 + CEILING_ART.HIT_S + .01, .6, 1, 0, 60 + CEILING_ART.HIT_S + .01);
   assert.equal(kiln.ceilingGlow.material.uniforms.uHit.value.z, 0, 'actual contact expires in lifetime time');
   const headroom = createHeadroom(scene);
-  headroom.setPlate('ember', new THREE.Texture());
+  const previousDocument = globalThis.document;
+  const context = new Proxy({}, { get(target, key) {
+    if (key === 'getImageData') return (x, y, w, h) => ({ data: new Uint8ClampedArray(w * h * 4) });
+    if (key === 'createLinearGradient' || key === 'createRadialGradient') return () => ({ addColorStop() {} });
+    return () => {};
+  } });
+  globalThis.document = { createElement: () => ({ getContext: () => context }) };
+  try { headroom.select('ember'); } finally { globalThis.document = previousDocument; }
+  headroom.setBundle('ember', { key: 'ember', far: new THREE.Texture() });
   const { world } = physicsWorld({ mode: 'bottom' });
   headroom.setWorld(world); headroom.clear(79999.3);
   headroom.frame(world, 80000, 0, .6, 60);
