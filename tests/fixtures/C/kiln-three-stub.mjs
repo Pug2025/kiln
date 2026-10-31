@@ -1,8 +1,9 @@
 // CPU transforms for the kiln frame and contact lifecycle. No DOM or WebGL renderer exists.
-import { Color, Vector3 as MarkVector3, Group as MarkGroup, Matrix4 as MarkMatrix4 } from './marks-three-stub.mjs';
-export { Color, Vector4, PlaneGeometry, BoxGeometry, RoundedBoxGeometry, TorusGeometry, ShaderMaterial, MeshBasicMaterial, InstancedBufferAttribute } from './marks-three-stub.mjs';
+import { Color as MarkColor, Vector3 as MarkVector3, Group as MarkGroup, Matrix4 as MarkMatrix4 } from './marks-three-stub.mjs';
+export { Vector4, PlaneGeometry, BoxGeometry, RoundedBoxGeometry, TorusGeometry, ShaderMaterial, MeshBasicMaterial, InstancedBufferAttribute } from './marks-three-stub.mjs';
 export { PlaneGeometry as RingGeometry } from './marks-three-stub.mjs';
 export const CustomBlending = 5, OneFactor = 201, OneMinusSrcAlphaFactor = 205, AdditiveBlending = 3;
+export class Color extends MarkColor { setHex(value) { return this.copy(new MarkColor(value)); } }
 export class Vector3 extends MarkVector3 { copy(v) { return this.set(v.x, v.y, v.z); } }
 export class Group extends MarkGroup {
   constructor() {
@@ -28,10 +29,12 @@ export class Matrix4 extends MarkMatrix4 {
 export class InstancedMesh extends Mesh {
   constructor(geometry, material, capacity) {
     super(geometry, material); this.capacity = capacity; this.count = capacity;
-    this.instanceMatrix = {}; this.matrices = [];
+    this.instanceMatrix = {}; this.matrices = []; this.boundingBox = this.boundingSphere = null;
   }
   setMatrixAt(index, matrix) { this.matrices[index] = [...matrix.value]; }
-  computeBoundingSphere() { this.boundsUpdates = (this.boundsUpdates || 0) + 1; }
+  // API/owner bookkeeping only; the real-Three pillar tests prove numeric aggregate bounds.
+  computeBoundingBox() { this.boundingBox ??= {}; this.boxUpdates = (this.boxUpdates || 0) + 1; }
+  computeBoundingSphere() { this.boundingSphere ??= {}; this.boundsUpdates = (this.boundsUpdates || 0) + 1; }
 }
 export class MeshStandardMaterial {
   constructor(options) { Object.assign(this, options); }

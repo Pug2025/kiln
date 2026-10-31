@@ -93,7 +93,8 @@ const { createKiln } = await import('../src/render/kiln.js');
 
 test('real kiln mode changes reuse the lintel, clip the outline and clear contact state before ring play', () => {
   const scene = new THREE.Group(), plain = {};
-  const kiln = createKiln(scene, { wallGlass: plain, titaniumP: plain, ribs: plain, pillars: plain, grate: {}, tex: { glow: {} } });
+  const pillars = { color: new THREE.Color(0x101216), envMapIntensity: .45 };
+  const kiln = createKiln(scene, { wallGlass: plain, titaniumP: plain, ribs: plain, pillars, grate: {}, tex: { glow: {} } });
   const pool = kiln.ceilingBar, glow = kiln.ceilingGlow, geometry = pool.geometry, material = pool.material;
   const walls = kiln.frame.children.slice(0, 4);
   assert.equal(new Set(walls.map(wall => wall.geometry)).size, 4, 'opposite walls own their translated geometry');

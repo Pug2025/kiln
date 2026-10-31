@@ -218,6 +218,7 @@ export async function createRenderer(host, opts = {}) {
     bricks.setReadability(details);
     pieces.setReadability(details);
     restPose(restCam, rig.fit.dist, rig.fit.look, width / height, rig.fit.centreX);
+    kiln.layoutPillars(width, height);
     headroom.layout(restCam, width, height, rig.fitOpts.frame);
     // fog follows the fitted distance (C call): phones fit the field farther away, and a fixed fog
     // dimmed every brick there (look test 02 flaw 3)

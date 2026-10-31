@@ -14,6 +14,9 @@ import { protectBed } from './paddle-source.js';
 const FW = FIELD.W, FH = FIELD.H;
 const HH_ = FIELD.H / 2;
 const { GRATE_Y, GRATE_Z, GRATE_BAR, GRATE_BEARER } = LOOK;
+// C2 exploration only: width / |x| / z. W > H is an audit candidate, not an accepted breakpoint.
+const PILLAR_LEGACY = [70, 680, -460];
+const PILLAR_LANDSCAPE = [50, 880, -700];
 
 /** PMREM of the procedural kiln box (ART 7 "Environment"). */
 export function makeEnvironment(gl) {
@@ -108,9 +111,26 @@ export function createKiln(scene, M) {
 
   const pillarGeo = new THREE.BoxGeometry(70, 1900, 700);
   const pillars = new THREE.InstancedMesh(pillarGeo, M.pillars, 2);
-  pillars.setMatrixAt(0, m4.makeTranslation(-680, 80, -460));
-  pillars.setMatrixAt(1, m4.makeTranslation(680, 80, -460));
-  pillars.instanceMatrix.needsUpdate = true;
+  pillars.name = 'kiln-pillars';
+  let pillarLayout = null;
+  function layoutPillars(width, height) {
+    // Exploratory eligibility only. Native art and HUD evidence must choose the final rule.
+    const layout = width > height ? PILLAR_LANDSCAPE : PILLAR_LEGACY;
+    if (layout === pillarLayout) return;
+    const [span, x, z] = layout;
+    for (let i = 0; i < 2; i++) {
+      m4.makeScale(span / 70, 1, 1).setPosition(i ? x : -x, 80, z);
+      pillars.setMatrixAt(i, m4);
+    }
+    pillars.instanceMatrix.needsUpdate = true;
+    pillars.computeBoundingBox();
+    pillars.computeBoundingSphere();
+    if (layout === PILLAR_LANDSCAPE) M.pillars.color.copy(PAL.graphite);
+    else M.pillars.color.setHex(0x101216);
+    M.pillars.envMapIntensity = layout === PILLAR_LANDSCAPE ? 0.3 : 0.45;
+    pillarLayout = layout;
+  }
+  layoutPillars(1, 1); // Exact legacy appearance before the first renderer resize.
   scene.add(pillars);
 
   // the grate under the kiln mouth (ART 15.3 C8): cast bars along x on two bearers, no square cells.
@@ -364,6 +384,7 @@ export function createKiln(scene, M) {
   return {
     hemi, key, rim, fireLight, deepLight, backMat, haze, shaftMat, bed, bedGuard, plate, frame,
     ceiling, ceilingBar, ceilingGlow,
+    layoutPillars,
 
     /** Frame pieces per field mode (ART 7; ring/left variants are C calls). */
     /** World y the flame tips must stay under (the lip line). */

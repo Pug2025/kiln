@@ -221,7 +221,7 @@ const HUD_GLSL = `
 const PLATE_FRAG = withOutput(`
   precision highp float; varying vec2 vUv; varying vec3 vW;
   uniform sampler2D uMap, uMask; uniform float uHasMask, uTime, uFire, uHeat, uMotion, uSweep, uClear, uBoss, uGrade, uWallY;
-  uniform float uGraded, uGlowGain, uBodyGain, uQuietBody, uQuietEmit;
+  uniform float uGraded, uGlowGain, uBodyGain, uQuietBody, uQuietEmit, uPhoneRisers;
   uniform vec3 uHeatLo, uHeatHi; uniform vec4 uCrop, uBox;
   ${NOISE}
   ${QUIET}
@@ -255,6 +255,12 @@ const PLATE_FRAG = withOutput(`
     // behind D's HUD (the phone band, the desktop gutters) the body steps back and the glow goes out
     float hud = hudZone(vW);
     vec3 col = body * mix(1.0, uQuietBody, q) * mix(1.0, ${HUD_BODY.toFixed(2)}, hud) + min(emit, vec3(0.45)) * mix(1.0, uQuietEmit, q) * (1.0 - hud);
+    // Blaze keeps its desktop composition; phone HUD columns have clear space around the risers.
+    if (uPhoneRisers > 0.5 && uHud.y > 0.5) {
+      float leftRiser = 1.0 - smoothstep(0.045, 0.075, abs(uv.x - 0.206));
+      float rightRiser = 1.0 - smoothstep(0.045, 0.075, abs(uv.x - 0.736));
+      col *= 1.0 - max(leftRiser, rightRiser) * hud;
+    }
     col = capLum(col);
     // fade the sides into the kiln (and out in the gutters) and the bottom to black at the wall
     float a = smoothstep(0.0, 0.12, vUv.x) * smoothstep(1.0, 0.88, vUv.x) * smoothstep(uWallY * 0.5, uWallY + 0.08, vUv.y) * gutterFade(vW);
@@ -318,7 +324,7 @@ export function createHeadroom(scene) {
       uSweep: { value: 1 }, uClear: { value: 0 }, uBoss: { value: 0 }, uGrade: { value: 0 },
       uWallY: { value: 0.3 }, uCrop: { value: new THREE.Vector4(0, 0, 1, 1) },
       uGraded: { value: 0 }, uGlowGain: { value: 0.36 }, uBodyGain: { value: 1 },
-      uQuietBody: { value: 1 }, uQuietEmit: { value: 1 }, uBox: { value: new THREE.Vector4(0, 0, 0, 0) },
+      uQuietBody: { value: 1 }, uQuietEmit: { value: 1 }, uPhoneRisers: { value: 0 }, uBox: { value: new THREE.Vector4(0, 0, 0, 0) },
       uHud: { value: new THREE.Vector2(1e5, 0) }, uGut: { value: new THREE.Vector2(1e5, 1) },
       uHeatLo: { value: PAL_VEC3.heatLo }, uHeatHi: { value: PAL_VEC3.heatHi },
     },
@@ -446,6 +452,7 @@ export function createHeadroom(scene) {
     st.name = name;
     st.kit = kit;
     const u = plateMat.uniforms, v = midMat.uniforms;
+    u.uPhoneRisers.value = name === 'blaze' ? 1 : 0;
     u.uMap.value = p.far;
     u.uMask.value = p.mask || blank;
     u.uHasMask.value = p.mask ? 1 : 0;
